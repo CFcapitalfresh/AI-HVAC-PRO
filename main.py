@@ -10,6 +10,7 @@ from streamlit_gsheets import GSheetsConnection
 # Εισαγωγή των νέων σελίδων από τον φάκελο app_modules
 from app_modules import page_search
 from app_modules import page_review
+from app_modules import page_admin  # <--- ΝΕΑ ΠΡΟΣΘΗΚΗ
 
 # Τα δικά σου αρχεία
 import auth   
@@ -110,7 +111,8 @@ with st.sidebar:
     # --- ΤΡΟΠΟΠΟΙΗΜΕΝΟ ΜΕΝΟΥ ---
     menu_options = ["Chat (AI)", "🧮 Εργαλεία", "📇 Πελατολόγιο", "Βοήθεια"]
     if user.get('role') == 'admin': 
-        menu_options.extend(["Users", "Drive & Library", "🔍 Αναζήτηση", "🛠️ Διόρθωση", "Logs"])
+        # ΠΡΟΣΘΕΣΑ ΤΟ "⚙️ Ρυθμίσεις" ΣΤΟ ΤΕΛΟΣ
+        menu_options.extend(["Users", "Drive & Library", "🔍 Αναζήτηση", "🛠️ Διόρθωση", "Logs", "⚙️ Ρυθμίσεις"])
     
     mode = st.sidebar.radio("Μενού", menu_options)
     
@@ -126,7 +128,6 @@ if mode == "Chat (AI)":
     with c2: audio_val = st.audio_input("🎙️ Πες τη βλάβη")
     pdf_files = st.file_uploader("📂 PDF Manual", accept_multiple_files=True, type=['pdf'])
     
-    # ... (ο υπόλοιπος κώδικας του Chat όπως τον είχες) ...
     uploaded_pdfs = []
     if pdf_files:
         for f in pdf_files:
@@ -179,7 +180,6 @@ elif mode == "Users":
     st.dataframe(users_df)
 
 # ADMIN - Drive & Library
-# ADMIN - Drive & Library
 elif mode == "Drive & Library":
     st.title("☁️ Drive & Library Manager")
     
@@ -206,8 +206,8 @@ elif mode == "Drive & Library":
         c2.metric("📖 User", um_count)
         c3.metric("⚠️ Errors", err_count)
 
-        # 👇 ΕΔΩ ΕΙΝΑΙ ΤΟ ΚΟΥΜΠΙ ΓΙΑ ΤΟ EXCEL 👇
-        csv = df.to_csv(index=False).encode('utf-8-sig') # utf-8-sig για να διαβάζει σωστά τα Ελληνικά το Excel
+        # BUTTON EXPORT
+        csv = df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Κατέβασμα Λίστας σε Excel (CSV)",
             data=csv,
@@ -216,7 +216,6 @@ elif mode == "Drive & Library":
             use_container_width=True
         )
         
-        # 👇 ΕΔΩ ΕΙΝΑΙ Η ΑΝΑΛΥΤΙΚΗ ΛΙΣΤΑ 👇
         with st.expander("🔎 Δείτε όλα τα αρχεία αναλυτικά"):
             st.dataframe(df[['name', 'brand', 'model', 'meta_type']], use_container_width=True)
             
@@ -239,6 +238,9 @@ elif mode == "🔍 Αναζήτηση":
 
 elif mode == "🛠️ Διόρθωση":
     page_review.show_review_page()
+
+elif mode == "⚙️ Ρυθμίσεις":  # <--- Η ΝΕΑ ΣΕΛΙΔΑ
+    page_admin.show_admin_page()
 
 # ADMIN - Logs
 elif mode == "Logs":
