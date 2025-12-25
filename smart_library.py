@@ -1,5 +1,5 @@
 # Αρχείο: smart_library.py
-# ΕΚΔΟΣΗ: "PERSISTENT AI" (ΕΠΙΜΟΝΗ ΑΝΑΛΥΣΗ)
+# ΕΚΔΟΣΗ: "PERSISTENT AI + SELF HEAL" (ΕΠΙΜΟΝΗ ΑΝΑΛΥΣΗ & ΑΥΤΟ-ΙΑΣΗ)
 
 import streamlit as st
 import google.generativeai as genai
@@ -10,10 +10,55 @@ import json
 import pypdf
 import drive
 import re
+import os
+import pandas as pd  # <--- Προστέθηκε για τη βάση δεδομένων
 
 # Ρυθμίσεις
 UNSORTED_FOLDER_NAME = "!_UNSORTED_REVIEW"
 INDEX_FILE = "drive_index.json"
+
+# --- 1. ΝΕΑ ΛΕΙΤΟΥΡΓΙΑ: AUTO-FIX DATABASE (Αυτό έλειπε) ---
+def auto_fix_database(json_file):
+    """
+    Ελέγχει αν το αρχείο βάσης (json) υπάρχει και αν έχει τις σωστές στήλες.
+    Αν κάτι λείπει, το διορθώνει αυτόματα χωρίς να κρασάρει το πρόγραμμα.
+    """
+    # Αυτές είναι οι στήλες που ΑΠΑΙΤΟΥΜΕ να υπάρχουν
+    required_columns = ['name', 'brand', 'model', 'meta_type', 'file_id', 'error_codes']
+    
+    # Περίπτωση 1: Δεν υπάρχει καθόλου το αρχείο
+    if not os.path.exists(json_file):
+        # print(f"⚠️ Το αρχείο {json_file} δεν βρέθηκε. Δημιουργείται νέο...") # Debug
+        df = pd.DataFrame(columns=required_columns)
+        try:
+            df.to_json(json_file, orient='records', indent=4)
+        except: pass
+        return df
+
+    # Περίπτωση 2: Υπάρχει, αλλά μπορεί να είναι παλιό
+    try:
+        df = pd.read_json(json_file)
+        
+        # Ελέγχουμε αν λείπει καμία στήλη
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        
+        if missing_cols:
+            # print(f"🔧 Βρέθηκαν ελλείψεις στη βάση: {missing_cols}. Διορθώνονται...") # Debug
+            
+            # Προσθέτουμε τις κενές στήλες που λείπουν
+            for col in missing_cols:
+                df[col] = "Unknown" 
+                
+            # Αποθηκεύουμε τη διορθωμένη έκδοση
+            df.to_json(json_file, orient='records', indent=4)
+            
+        return df
+        
+    except Exception as e:
+        # print(f"❌ Υπήρξε πρόβλημα με το αρχείο: {e}")
+        return pd.DataFrame(columns=required_columns)
+
+# --- 2. ΥΠΑΡΧΟΥΣΕΣ ΛΕΙΤΟΥΡΓΙΕΣ (AI & DRIVE) ---
 
 def find_best_model():
     """Επιλέγει αυτόματα το καλύτερο διαθέσιμο μοντέλο."""
@@ -161,7 +206,7 @@ def run_full_maintenance(root_folder_id):
 
 def get_stats_dataframe():
     try:
-        import pandas as pd
+        # Χρησιμοποιούμε το pd που κάναμε import στην αρχή
         with open(INDEX_FILE, "r", encoding="utf-8") as f:
             return pd.DataFrame(json.load(f))
     except: return None
