@@ -1,7 +1,9 @@
 streamlit
-google-generativeai
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
+google-generativeai>=0.8.0
 pypdf
 pandas
+google-auth
+google-auth-oauthlib
+google-api-python-client
+Pillow
+st-gsheets-connection

@@ -1,0 +1,9 @@
+# Αγνοούμε τους κωδικούς
+.streamlit/secrets.toml
+secrets.toml
+
+# Αγνοούμε προσωρινά αρχεία Python
+__pycache__/
+*.pyc
+token.json
+credentials.json
