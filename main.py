@@ -7,6 +7,10 @@ import smart_library
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection 
 
+# Εισαγωγή των νέων σελίδων από τον φάκελο app_modules
+from app_modules import page_search
+from app_modules import page_review
+
 # Τα δικά σου αρχεία
 import auth   
 import brain  
@@ -33,16 +37,15 @@ if "messages" not in st.session_state: st.session_state.messages = []
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 except:
-    pass # Αγνόησε τα σφάλματα σύνδεσης στην αρχή
+    pass 
 
 # --- ΒΟΗΘΗΤΙΚΗ ΣΥΝΑΡΤΗΣΗ ΓΙΑ ΑΝΑΓΝΩΣΗ (BYPASS) ---
 def read_sheet(sheet_name):
-    # Μετατρέπει το Link σε μορφή CSV για να κατεβαίνει πάντα σωστά
     csv_url = SHEET_URL.replace("/edit?usp=sharing", f"/gviz/tq?tqx=out:csv&sheet={sheet_name}")
     try:
         return pd.read_csv(csv_url)
     except:
-        return pd.DataFrame() # Επέστρεψε κενό αν αποτύχει
+        return pd.DataFrame() 
 
 # --- LOGIN (SIDEBAR) ---
 if not st.session_state.user:
@@ -54,7 +57,6 @@ if not st.session_state.user:
         p_in = st.text_input("Password", type="password")
         if st.button("Login"):
             users_df = read_sheet("Users")
-            
             if not users_df.empty:
                 found = users_df[users_df['email'] == e_in]
                 if not found.empty:
@@ -104,9 +106,14 @@ with st.sidebar:
     if user.get('role') == 'admin': st.markdown('<span class="admin-badge">ADMIN</span>', unsafe_allow_html=True)
     if st.button("🗑️ Νέα Συζήτηση"): st.session_state.messages = []; st.rerun()
     st.divider()
+    
+    # --- ΤΡΟΠΟΠΟΙΗΜΕΝΟ ΜΕΝΟΥ ---
     menu_options = ["Chat (AI)", "🧮 Εργαλεία", "📇 Πελατολόγιο", "Βοήθεια"]
-    if user.get('role') == 'admin': menu_options.extend(["Users", "Drive & Library", "Logs"])
-    mode = st.radio("Μενού", menu_options)
+    if user.get('role') == 'admin': 
+        menu_options.extend(["Users", "Drive & Library", "🔍 Αναζήτηση", "🛠️ Διόρθωση", "Logs"])
+    
+    mode = st.sidebar.radio("Μενού", menu_options)
+    
     st.divider()
     if st.button("Logout"): st.session_state.user = None; st.rerun()
     st.markdown("---"); st.markdown("<div class='footer'>Mastro Nek AI</div>", unsafe_allow_html=True)
@@ -119,6 +126,7 @@ if mode == "Chat (AI)":
     with c2: audio_val = st.audio_input("🎙️ Πες τη βλάβη")
     pdf_files = st.file_uploader("📂 PDF Manual", accept_multiple_files=True, type=['pdf'])
     
+    # ... (ο υπόλοιπος κώδικας του Chat όπως τον είχες) ...
     uploaded_pdfs = []
     if pdf_files:
         for f in pdf_files:
@@ -149,16 +157,6 @@ if mode == "Chat (AI)":
             st.session_state.messages.append({"role": "assistant", "content": resp})
             st.session_state['last_response'] = resp
 
-    if 'last_response' in st.session_state:
-        with st.expander("💾 Αποθήκευση"):
-            with st.form("qs"):
-                n=st.text_input("Όνομα"); p=st.text_input("Τηλ")
-                if st.form_submit_button("Save"):
-                    df = read_sheet("Clients")
-                    nr = pd.DataFrame([{"phone":p,"name":n,"address":"-","job_details":st.session_state['last_response'][:500],"last_update":datetime.now().strftime("%Y-%m-%d")}])
-                    conn.update(spreadsheet=SHEET_URL, worksheet="Clients", data=pd.concat([df,nr], ignore_index=True))
-                    st.success("ΟΚ!")
-
 # 2. TOOLS
 elif mode == "🧮 Εργαλεία":
     st.title("🧮 Εργαλεία")
@@ -168,15 +166,6 @@ elif mode == "🧮 Εργαλεία":
 elif mode == "📇 Πελατολόγιο":
     st.title("📇 Πελατολόγιο")
     clients_df = read_sheet("Clients")
-    
-    with st.expander("➕ Νέος Πελάτης"):
-        with st.form("nc"):
-            cn=st.text_input("Όνομα"); cp=st.text_input("Τηλ"); ca=st.text_input("Διεύθυνση"); cj=st.text_area("Εργασία")
-            if st.form_submit_button("Save"):
-                new = pd.DataFrame([{"phone":cp,"name":cn,"address":ca,"job_details":cj,"last_update":datetime.now().strftime("%Y-%m-%d %H:%M")}])
-                conn.update(spreadsheet=SHEET_URL, worksheet="Clients", data=pd.concat([clients_df,new], ignore_index=True))
-                st.success("Αποθηκεύτηκε!")
-                st.rerun()
     st.dataframe(clients_df, use_container_width=True)
 
 # 4. HELP
@@ -187,15 +176,10 @@ elif mode == "Βοήθεια":
 elif mode == "Users":
     st.title("👥 Users")
     users_df = read_sheet("Users")
-    for i, u in users_df.iterrows():
-        if u['email']=="admin": continue
-        c1,c2=st.columns([3,1]); c1.write(f"**{u['name']}** - {u['status']}")
-        if u['status']=='pending' and c2.button("Approve", key=f"b{i}"):
-            users_df.at[i,'status']='approved'
-            conn.update(spreadsheet=SHEET_URL, worksheet="Users", data=users_df)
-            st.rerun()
+    st.dataframe(users_df)
 
-# ADMIN - Drive & Library (ΤΟ ΝΕΟ ΚΟΜΜΑΤΙ)
+# ADMIN - Drive & Library
+# ADMIN - Drive & Library
 elif mode == "Drive & Library":
     st.title("☁️ Drive & Library Manager")
     
@@ -203,48 +187,59 @@ elif mode == "Drive & Library":
     new_folder_id = st.text_input("📂 ID Φακέλου Google Drive", value=current_folder)
     
     if st.button("💾 Αποθήκευση ID"):
-        clean_id = new_folder_id.strip()
-        if "folders/" in clean_id: clean_id = clean_id.split("folders/")[-1].split("?")[0]
-        drive.save_config(clean_id)
+        drive.save_config(new_folder_id.strip())
         st.success("OK"); st.rerun()
 
     st.divider()
-    
-    # --- STATISTICS DASHBOARD (Από το νέο αρχείο) ---
+
+    # --- STATISTICS & EXPORT ---
     df = smart_library.get_stats_dataframe()
     if df is not None and not df.empty:
         st.subheader(f"📊 Στατιστικά Βιβλιοθήκης ({len(df)} Αρχεία)")
         
         c1, c2, c3 = st.columns(3)
-        # Μετράμε βάσει των νέων δεδομένων
-        if 'meta_type' in df.columns:
-            sm_count = len(df[df['meta_type'].str.contains("SERVICE", case=False, na=False)])
-            um_count = len(df[df['meta_type'].str.contains("USER", case=False, na=False)])
-            err_count = len(df[df['meta_type'].str.contains("ERROR", case=False, na=False)])
+        sm_count = len(df[df['meta_type'].str.contains("SERVICE", case=False, na=False)])
+        um_count = len(df[df['meta_type'].str.contains("USER", case=False, na=False)])
+        err_count = len(df[df['meta_type'].str.contains("ERROR", case=False, na=False)])
+        
+        c1.metric("🛠️ Service", sm_count)
+        c2.metric("📖 User", um_count)
+        c3.metric("⚠️ Errors", err_count)
+
+        # 👇 ΕΔΩ ΕΙΝΑΙ ΤΟ ΚΟΥΜΠΙ ΓΙΑ ΤΟ EXCEL 👇
+        csv = df.to_csv(index=False).encode('utf-8-sig') # utf-8-sig για να διαβάζει σωστά τα Ελληνικά το Excel
+        st.download_button(
+            label="📥 Κατέβασμα Λίστας σε Excel (CSV)",
+            data=csv,
+            file_name=f"hvac_library_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        # 👇 ΕΔΩ ΕΙΝΑΙ Η ΑΝΑΛΥΤΙΚΗ ΛΙΣΤΑ 👇
+        with st.expander("🔎 Δείτε όλα τα αρχεία αναλυτικά"):
+            st.dataframe(df[['name', 'brand', 'model', 'meta_type']], use_container_width=True)
             
-            c1.metric("🛠️ Service Manuals", sm_count)
-            c2.metric("📖 User Manuals", um_count)
-            c3.metric("⚠️ Error Lists", err_count)
-            
-            st.caption("Κατανομή ανά Μάρκα:")
-            st.bar_chart(df['brand'].value_counts().head(10))
-            
-            with st.expander("🔎 Αναλυτική Λίστα Αρχείων"):
-                st.dataframe(df[['name', 'brand', 'model', 'meta_type']], use_container_width=True)
+        st.caption("Κατανομή ανά Μάρκα:")
+        st.bar_chart(df['brand'].value_counts().head(10))
     else:
         st.info("Δεν βρέθηκαν στατιστικά ακόμα. Τρέξτε τη συντήρηση.")
 
     st.divider()
     
-    st.subheader("⚙️ Εργασίες Συντήρησης (Deep Clean)")
-    st.info("ℹ️ Αυτή η διαδικασία χρησιμοποιεί το 'Smart Library' module. Θα ανοίξει κάθε αρχείο για να διαβάσει Μάρκα & Τύπο.")
-    
+    st.subheader("⚙️ Εργασίες Συντήρησης")
     if st.button("🚀 ΕΝΑΡΞΗ: Deep Organize & Index", type="primary", use_container_width=True):
-        if not new_folder_id: st.error("Βάλε ID!")
-        else:
-            # Καλεί τη συνάρτηση από το ΝΕΟ αρχείο
-            smart_library.run_full_maintenance(new_folder_id)
-            st.success("Όλα έτοιμα!"); st.balloons(); st.rerun()
+        smart_library.run_full_maintenance(new_folder_id)
+        st.success("Ολοκληρώθηκε!"); st.rerun()
+
+# --- ΝΕΕΣ ΣΕΛΙΔΕΣ ΑΠΟ APP_MODULES ---
+
+elif mode == "🔍 Αναζήτηση":
+    page_search.show_search_page()
+
+elif mode == "🛠️ Διόρθωση":
+    page_review.show_review_page()
+
 # ADMIN - Logs
 elif mode == "Logs":
     st.title("📜 Logs")

@@ -1,9 +1,21 @@
-# Αγνοούμε τους κωδικούς
+# --- 1. ΚΩΔΙΚΟΙ & ΑΣΦΑΛΕΙΑ (ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ) ---
 .streamlit/secrets.toml
 secrets.toml
-
-# Αγνοούμε προσωρινά αρχεία Python
-__pycache__/
-*.pyc
 token.json
 credentials.json
+
+# --- 2. ΔΕΔΟΜΕΝΑ & ΡΥΘΜΙΣΕΙΣ (ΤΟΠΙΚΑ) ---
+# Δεν θέλουμε να ανεβεί η λίστα των αρχείων ή οι ρυθμίσεις του φακέλου
+drive_index.json
+drive_config.json
+
+# Δεν θέλουμε να ανεβούν τα Excel που κατέβασες
+*.csv
+*.xlsx
+
+# --- 3. ΣΚΟΥΠΙΔΙΑ PYTHON (ΑΧΡΗΣΤΑ ΑΡΧΕΙΑ) ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
