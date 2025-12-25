@@ -1,149 +1,122 @@
+# Αρχείο: brain.py
+# ΕΚΔΟΣΗ: 2.2.0 - CROSS-REFERENCE EDITION
+
 import google.generativeai as genai
-import time
-import json
+import PIL.Image
 import os
-import drive 
-import streamlit as st
+import json
+import pandas as pd
 import pypdf
-import organizer
-from google.api_core import exceptions
 import re
-from PIL import Image # Για τις εικόνες
+import drive
 
-ACTIVE_MODEL_NAME = None
-LAST_ERROR = ""
-
-SAFETY_SETTINGS = [
-    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-]
+INDEX_FILE = "drive_index.json"
 
 def setup_ai(api_key):
-    global ACTIVE_MODEL_NAME, LAST_ERROR
-    if not api_key: 
-        LAST_ERROR = "No API Key provided."
-        return
-    try:
+    if api_key:
         genai.configure(api_key=api_key)
+
+def find_best_model():
+    """Επιλέγει δυναμικά το μοντέλο για αποφυγή σφαλμάτων 404."""
+    try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # Προτεραιότητα σε μοντέλα που βλέπουν και ακούνε (Flash/Pro)
-        preferred_order = [
-            "gemini-2.0-flash-exp", "models/gemini-2.0-flash-exp",
-            "gemini-1.5-pro", "models/gemini-1.5-pro",
-            "gemini-1.5-flash", "models/gemini-1.5-flash"
-        ]
-        
-        selected_model = None
-        for p in preferred_order:
-            if p in available_models:
-                selected_model = p
-                break
-        
-        if not selected_model:
-            for m in available_models:
-                if "gemini" in m: selected_model = m; break
-        
-        if selected_model:
-            ACTIVE_MODEL_NAME = selected_model
-            print(f"✅ AI Connected using: {ACTIVE_MODEL_NAME}")
-        else:
-            LAST_ERROR = "No compatible Gemini models found."
-    except Exception as e: 
-        LAST_ERROR = str(e)
+        for pref in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-2.0-flash-exp']:
+            if pref in available_models: return pref
+        return available_models[0]
+    except: return 'gemini-1.5-flash'
 
-def extract_text_from_pdf(pdf_path):
+def load_comprehensive_context(user_query):
+    """
+    Εντοπίζει ΟΛΑ τα σχετικά αρχεία για τη μάρκα/μοντέλο 
+    ώστε το AI να έχει πλήρη εικόνα της βιβλιοθήκης.
+    """
+    context = ""
     try:
-        reader = pypdf.PdfReader(pdf_path)
-        text = ""
-        for i, page in enumerate(reader.pages):
-            if i > 250: break 
-            extract = page.extract_text()
-            if extract: text += extract + "\n"
-        return text
-    except: return None
+        if os.path.exists(INDEX_FILE):
+            with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                db = json.load(f)
+                
+                # Εντοπισμός μάρκας από την ερώτηση
+                detected_brand = ""
+                for entry in db:
+                    if entry['brand'].lower() in user_query.lower():
+                        detected_brand = entry['brand']
+                        break
+                
+                if detected_brand:
+                    relevant = [e for e in db if e['brand'] == detected_brand]
+                    context = f"\n--- ΔΙΑΘΕΣΙΜΑ ΕΓΧΕΙΡΙΔΙΑ ΓΙΑ {detected_brand.upper()} ---\n"
+                    for item in relevant:
+                        context += f"- [{item['meta_type']}]: {item['name']}\n"
+                    context += "\nΟΔΗΓΙΑ: Χρησιμοποίησε συνδυαστικά πληροφορίες από τα παραπάνω αν χρειαστεί.\n"
+    except: pass
+    return context
 
-def find_best_manual_locally(query):
-    # (Ίδια λογική με πριν για αναζήτηση manual)
-    if not os.path.exists("drive_index.json"): return None
+def smart_solve(user_query, pdf_paths, img_files, audio_file, history, mode="General"):
     try:
-        with open("drive_index.json", "r", encoding="utf-8") as f: data = json.load(f)
-    except: return None
+        selected_model = find_best_model()
+        model = genai.GenerativeModel(selected_model)
         
-    query_lower = query.lower()
-    query_words = [w for w in query_lower.split() if len(w) > 2]
-    best_file = None
-    best_score = -500
-    
-    for file in data:
-        score = 0
-        real_model = str(file.get('real_model', '')).lower()
-        search_terms = str(file.get('search_terms', '')).lower()
-        for word in query_words:
-            if word in real_model or word in search_terms: score += 100
-        if score > best_score:
-            best_score = score
-            best_file = file
-    return best_file
+        # Φόρτωση σφαιρικού πλαισίου (Cross-Reference)
+        library_context = load_comprehensive_context(user_query)
+        
+        system_instruction = f"""
+        Είσαι ο 'Mastro Nek AI', ένας Senior HVAC Expert.
+        
+        ΣΤΡΑΤΗΓΙΚΗ ΑΝΑΛΥΣΗΣ:
+        1. ΣΥΝΔΥΑΣΤΙΚΗ ΣΚΕΨΗ: Μην βασίζεσαι σε ένα μόνο έγγραφο. Αν για μια βλάβη (π.χ. Error 104) το Service Manual μιλά για κυκλοφορία και το Installation Manual δείχνει τη θέση της αντλίας, σύνθεσε τις πληροφορίες.
+        2. ΔΙΑΣΤΑΥΡΩΣΗ: Αν ένα έγγραφο (π.χ. Electric Diagram) δεν επαρκεί για την ερμηνεία μιας βλάβης, ανάφερέ το και χρησιμοποίησε τη γενική τεχνική σου γνώση για να συμπληρώσεις τα κενά.
+        3. ΑΝΑΦΟΡΑ ΠΗΓΩΝ: Αν η απάντηση προέρχεται από 2 ή 3 διαφορετικά manuals, ανάφερέ τα όλα.
+        4. ΤΕΧΝΙΚΗ ΑΚΡΙΒΕΙΑ: Δώσε έμφαση στις λεπτομέρειες που κάνουν τη διαφορά (π.χ. ρυθμίσεις παραμέτρων, έλεγχος αισθητήρων NTC).
+        
+        {library_context}
+        """
+        
+        contents = [system_instruction]
+        if history:
+            for msg in history[-6:]:
+                contents.append(f"{msg['role'].upper()}: {msg['content']}")
 
-# --- Η ΝΕΑ ΕΞΥΠΝΗ ΣΥΝΑΡΤΗΣΗ ΜΕ ΟΡΑΣΗ ΚΑΙ ΑΚΟΗ ---
-def smart_solve(prompt, pdf_files, image_files, audio_file, history, tech_type):
-    if not ACTIVE_MODEL_NAME: return f"⚠️ System Error: {LAST_ERROR}"
-    
-    try:
-        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
-    except Exception as e: return f"⚠️ Model Error: {e}"
-    
-    # 1. Προετοιμασία περιεχομένου για το AI
-    content_parts = []
-    
-    # Προσθήκη Κειμένου Προτροπής
-    base_prompt = f"ROLE: Είσαι Έμπειρος Αρχιτεχνίτης {tech_type} (Mastro Nek). Απάντα σύντομα και τεχνικά."
-    if prompt:
-        content_parts.append(base_prompt + "\nΕΡΩΤΗΣΗ: " + prompt)
-    else:
-        content_parts.append(base_prompt + "\nΑνάλυσε τα αρχεία που σου έστειλα (Εικόνα/Ήχο) και πες μου τη βλάβη.")
+        # Επεξεργασία Πολυμέσων (Ήχος/Εικόνα)
+        if audio_file:
+            contents.append({"mime_type": "audio/wav", "data": audio_file.read() if hasattr(audio_file, 'read') else audio_file})
+        if img_files:
+            for img in img_files:
+                if img: contents.append(PIL.Image.open(img))
 
-    # 2. Προσθήκη Εικόνων
-    if image_files:
-        for img_path in image_files:
-            img = Image.open(img_path)
-            content_parts.append(img)
-            content_parts.append("Αυτή είναι η φωτογραφία της μονάδας/βλάβης.")
+        # Ανάλυση PDF (Ανέβασμα από τον χρήστη)
+        if pdf_paths:
+            combined_pdf_text = ""
+            for path in pdf_paths:
+                try:
+                    reader = pypdf.PdfReader(path)
+                    for i in range(min(15, len(reader.pages))):
+                        combined_pdf_text += f"--- Από αρχείο {os.path.basename(path)} ---\n"
+                        combined_pdf_text += reader.pages[i].extract_text() + "\n"
+                except: pass
+            contents.append(f"ΠΕΡΙΕΧΟΜΕΝΟ ΑΝΕΒΑΣΜΕΝΩΝ PDF:\n{combined_pdf_text[:20000]}")
 
-    # 3. Προσθήκη Ήχου (Φωνητική εντολή)
-    if audio_file:
-        # Το Gemini Flash υποστηρίζει ήχο απευθείας!
-        # Χρειάζεται να το στείλουμε ως blob, αλλά για απλότητα εδώ
-        # θα βασιστούμε στο ότι το upload στο UI δίνει αρχείο.
-        # *Σημείωση: Το audio θέλει ειδική διαχείριση στο API, 
-        # εδώ θα κάνουμε μια απλή προσπάθεια transcription αν αποτύχει το direct.*
-        content_parts.append({
-            "mime_type": "audio/wav",
-            "data": audio_file.getvalue()
-        })
-        content_parts.append("Αυτή είναι η φωνητική εντολή του τεχνικού. Απάντα σε αυτό που ρωτάει.")
+        contents.append(f"ΕΡΩΤΗΣΗ ΧΡΗΣΤΗ: {user_query}")
+        
+        response = model.generate_content(contents)
+        final_text = response.text
 
-    # 4. Προσθήκη PDF Manuals (Αν υπάρχουν)
-    if pdf_files:
-        for p in pdf_files:
-            text = extract_text_from_pdf(p)
-            if text: content_parts.append(f"MANUAL DATA: {text[:5000]}") # Μικρό απόσπασμα για ταχύτητα
+        # Προσθήκη Πολλαπλών Links Πηγών
+        if os.path.exists(INDEX_FILE):
+            try:
+                with open(INDEX_FILE, "r", encoding="utf-8") as f:
+                    db = json.load(f)
+                    links = []
+                    # Εντοπισμός όλων των σχετικών αρχείων που αναφέρθηκαν ή είναι σχετικά
+                    for entry in db:
+                        if entry['brand'].lower() in final_text.lower() and entry['model'].lower() in final_text.lower():
+                            link_md = f"\n📂 **Σχετικό Έγγραφο:** [{entry['name']}](https://drive.google.com/open?id={entry['file_id']})"
+                            if link_md not in links: links.append(link_md)
+                    
+                    if links:
+                        final_text += "\n\n**Πηγές από τη Βιβλιοθήκη σου:**\n" + "".join(links)
+            except: pass
 
-    # 5. Αναζήτηση στη Βιβλιοθήκη (Αν δεν έχουμε ανεβάσει κάτι τώρα)
-    if not pdf_files and not image_files and prompt:
-        best_file = find_best_manual_locally(prompt)
-        if best_file:
-            pdf_path = drive.get_file_path(best_file['id'])
-            if pdf_path:
-                text = extract_text_from_pdf(pdf_path)
-                content_parts.append(f"ΒΡΗΚΑ ΑΥΤΟ ΤΟ MANUAL ΣΤΗ ΒΙΒΛΙΟΘΗΚΗ: {text[:4000]}")
-
-    try:
-        # Κλήση στο AI με όλα τα δεδομένα μαζί!
-        response = model.generate_content(content_parts, safety_settings=SAFETY_SETTINGS)
-        return response.text
+        return final_text
     except Exception as e:
-        return f"⚠️ Σφάλμα AI: {e}"
+        return f"❌ Σφάλμα συστήματος: {str(e)}"
