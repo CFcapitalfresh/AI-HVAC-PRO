@@ -1,6 +1,3 @@
-# Αρχείο: smart_library.py
-# ΕΚΔΟΣΗ: "PERSISTENT AI + SELF HEAL" (ΕΠΙΜΟΝΗ ΑΝΑΛΥΣΗ & ΑΥΤΟ-ΙΑΣΗ)
-
 import streamlit as st
 import google.generativeai as genai
 from googleapiclient.http import MediaIoBaseDownload
@@ -11,24 +8,35 @@ import pypdf
 import drive
 import re
 import os
-import pandas as pd  # <--- Προστέθηκε για τη βάση δεδομένων
+import pandas as pd
 
 # Ρυθμίσεις
 UNSORTED_FOLDER_NAME = "!_UNSORTED_REVIEW"
 INDEX_FILE = "drive_index.json"
 
-# --- 1. ΝΕΑ ΛΕΙΤΟΥΡΓΙΑ: AUTO-FIX DATABASE (Αυτό έλειπε) ---
+# --- ΛΙΣΤΕΣ ΛΕΞΕΩΝ-ΚΛΕΙΔΙΩΝ (ΓΙΑ ΟΛΕΣ ΤΙΣ ΜΑΡΚΕΣ) ---
+# Αυτές οι λέξεις καθορίζουν αν θα μπει σε φάκελο Θέρμανσης ή Εκπαίδευσης
+BOILER_KEYWORDS = [
+    "BOILER", "GAS", "ΛΕΒΗΤΑΣ", "ΦΥΣΙΚΟ ΑΕΡΙΟ", "CONDENSING", "HEATING", 
+    "GENUS", "CLAS", "CARES", "ALTEAS", "FAST EVO", "NIMBUS", "LYDOS", 
+    "BAXI", "BUDERUS", "VIESSMANN", "IMMERGAS", "VAILLANT", "CHAFFOTEAUX", "RIELLO"
+]
+
+TRAINING_KEYWORDS = [
+    "TRAINING", "SEMINAR", "ACADEMY", "COURSE", "ΕΚΠΑΙΔΕΥΣΗ", "ΣΕΜΙΝΑΡΙΟ", 
+    "PRESENTATION", "ΠΑΡΟΥΣΙΑΣΗ", "WEBINAR", "WORKSHOP", "MANUAL TRAINING"
+]
+
+# --- 1. ΛΕΙΤΟΥΡΓΙΑ AUTO-FIX DATABASE ---
 def auto_fix_database(json_file):
     """
     Ελέγχει αν το αρχείο βάσης (json) υπάρχει και αν έχει τις σωστές στήλες.
     Αν κάτι λείπει, το διορθώνει αυτόματα χωρίς να κρασάρει το πρόγραμμα.
     """
-    # Αυτές είναι οι στήλες που ΑΠΑΙΤΟΥΜΕ να υπάρχουν
     required_columns = ['name', 'brand', 'model', 'meta_type', 'file_id', 'error_codes']
     
     # Περίπτωση 1: Δεν υπάρχει καθόλου το αρχείο
     if not os.path.exists(json_file):
-        # print(f"⚠️ Το αρχείο {json_file} δεν βρέθηκε. Δημιουργείται νέο...") # Debug
         df = pd.DataFrame(columns=required_columns)
         try:
             df.to_json(json_file, orient='records', indent=4)
@@ -43,8 +51,6 @@ def auto_fix_database(json_file):
         missing_cols = [col for col in required_columns if col not in df.columns]
         
         if missing_cols:
-            # print(f"🔧 Βρέθηκαν ελλείψεις στη βάση: {missing_cols}. Διορθώνονται...") # Debug
-            
             # Προσθέτουμε τις κενές στήλες που λείπουν
             for col in missing_cols:
                 df[col] = "Unknown" 
@@ -55,10 +61,9 @@ def auto_fix_database(json_file):
         return df
         
     except Exception as e:
-        # print(f"❌ Υπήρξε πρόβλημα με το αρχείο: {e}")
         return pd.DataFrame(columns=required_columns)
 
-# --- 2. ΥΠΑΡΧΟΥΣΕΣ ΛΕΙΤΟΥΡΓΙΕΣ (AI & DRIVE) ---
+# --- 2. ΛΕΙΤΟΥΡΓΙΕΣ AI & DRIVE ---
 
 def find_best_model():
     """Επιλέγει αυτόματα το καλύτερο διαθέσιμο μοντέλο."""
@@ -70,7 +75,7 @@ def find_best_model():
     except: return 'gemini-pro'
 
 def analyze_document_deeply(text, filename, attempt=1):
-    """Επίμονη ανάλυση με πολλαπλές προσπάθειες."""
+    """Επίμονη ανάλυση με πολλαπλές προσπάθειες και έξυπνη κατηγοριοποίηση."""
     api_key = st.secrets.get("GEMINI_KEY")
     if not api_key: return {"brand": "Unknown", "type": "GENERAL", "model": "-"}
 
@@ -79,18 +84,19 @@ def analyze_document_deeply(text, filename, attempt=1):
         model = genai.GenerativeModel(find_best_model())
         
         # Διαφορετικό prompt ανάλογα με την προσπάθεια
-        if attempt == 1:
-            # 1η Προσπάθεια: Γενική ανάλυση κειμένου
-            instruction = f"Analyze this HVAC manual text: '{text[:2500]}'. Filename: '{filename}'."
-        else:
-            # 2η Προσπάθεια: Εστίαση στο όνομα αρχείου και συσχετισμό μοντέλων
-            instruction = f"CRITICAL SEARCH: The previous text analysis was unclear. Use your expert knowledge to identify the BRAND from this FILENAME: '{filename}'. Even if the brand name isn't there, infer it from the model code (e.g., MSZ -> Mitsubishi, VAM -> Daikin)."
+        instruction = f"Analyze this HVAC manual text: '{text[:2500]}'. Filename: '{filename}'."
+        if attempt > 1:
+            instruction = f"CRITICAL SEARCH: Previous attempt failed. Identify BRAND and TYPE from FILENAME: '{filename}' and text."
 
         prompt = f"""
         {instruction}
-        Return a JSON object: {{"brand": "Name", "model": "Code", "type": "SERVICE MANUAL/USER MANUAL/INSTALLATION/PARTS/GENERAL"}}
-        If absolutely unknown, use "Unknown". 
-        Brand must be a single word (e.g. Daikin, LG, Midea, Mitsubishi, Fujitsu, Gree, Toshiba, Carrier, Samsung).
+        Return a JSON object: {{"brand": "Name", "model": "Code", "type": "SERVICE/USER/INSTALLATION/TRAINING/BOILER/PARTS"}}
+        
+        RULES:
+        1. If text/filename suggests training material, set type to 'TRAINING'.
+        2. If it is a Gas Boiler or Heating unit, set type to 'BOILER'.
+        3. Brand must be a single word.
+        If absolutely unknown, use "Unknown".
         """
         
         response = model.generate_content(prompt)
@@ -100,15 +106,24 @@ def analyze_document_deeply(text, filename, attempt=1):
         if json_match:
             data = json.loads(json_match.group())
             brand = str(data.get("brand", "Unknown")).strip().title()
+            doc_type = str(data.get("type", "GENERAL")).upper()
             
-            # Αν αποτύχει η 1η φορά, δοκίμασε 2η με εστίαση στο filename
+            # --- ΕΞΤΡΑ ΕΛΕΓΧΟΣ ΜΕ KEYWORDS (ΑΥΤΟΜΑΤΗ ΔΙΟΡΘΩΣΗ) ---
+            full_str = (filename + " " + text[:500]).upper()
+            
+            if any(k in full_str for k in TRAINING_KEYWORDS):
+                doc_type = "TRAINING"
+            elif any(k in full_str for k in BOILER_KEYWORDS):
+                doc_type = "BOILER"
+
+            # Αν αποτύχει η 1η φορά, δοκίμασε 2η
             if (brand == "Unknown" or brand == "-") and attempt == 1:
                 return analyze_document_deeply(text, filename, attempt=2)
             
             return {
                 "brand": brand if brand not in ["-", "", "None"] else "Unknown",
                 "model": str(data.get("model", "-")).strip(),
-                "type": str(data.get("type", "GENERAL")).upper()
+                "type": doc_type
             }
     except:
         if attempt == 1: return analyze_document_deeply(text, filename, attempt=2)
@@ -116,9 +131,9 @@ def analyze_document_deeply(text, filename, attempt=1):
     return {"brand": "Unknown", "type": "GENERAL", "model": "-"}
 
 def run_full_maintenance(root_folder_id):
-    """Κύρια λειτουργία ταξινόμησης."""
+    """Κύρια λειτουργία ταξινόμησης με Έξυπνους Φακέλους."""
     if not root_folder_id: return 0
-    status_box = st.status("🧠 Έξυπνη Ταξινόμηση σε εξέλιξη (Persistent Mode)...", expanded=True)
+    status_box = st.status("🧠 Έξυπνη Ταξινόμηση (Advanced Folders)...", expanded=True)
     service = drive.get_service()
     if not service: return 0
 
@@ -151,8 +166,12 @@ def run_full_maintenance(root_folder_id):
                 file_id = f['id']
                 file_name = f['name']
                 
-                # Αν είναι ήδη ταξινομημένο, προσπέρασέ το
-                if file_id in known_files and known_files[file_id].get("brand") != "Unknown":
+                # --- ΕΞΥΠΝΟΣ ΕΛΕΓΧΟΣ ΥΠΑΡΧΟΝΤΩΝ ---
+                # Αν το αρχείο είναι ήδη ταξινομημένο, το προσπερνάμε, ΕΚΤΟΣ αν είναι "ύποπτο" για λέβητα/εκπαίδευση
+                # ώστε να το διορθώσουμε τώρα.
+                is_suspect = any(k in file_name.upper() for k in TRAINING_KEYWORDS + BOILER_KEYWORDS)
+                
+                if file_id in known_files and known_files[file_id].get("brand") != "Unknown" and not is_suspect:
                     new_index_data.append(known_files[file_id])
                     continue
                 
@@ -166,20 +185,31 @@ def run_full_maintenance(root_folder_id):
                     for i in range(min(5, len(reader.pages))): extracted_text += reader.pages[i].extract_text() + "\n"
                 except: pass
                 
-                # ΕΔΩ ΓΙΝΕΤΑΙ Η ΔΙΠΛΗ/ΤΡΙΠΛΗ ΠΡΟΣΠΑΘΕΙΑ
                 metadata = analyze_document_deeply(extracted_text, file_name)
                 brand = metadata["brand"]
+                doc_type = metadata["type"]
                 
-                # Επιλογή Φακέλου
-                if brand not in folder_cache:
-                    q = f"name = '{brand}' and '{root_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+                # --- ΕΠΙΛΟΓΗ ΦΑΚΕΛΟΥ (SMART FOLDERS) ---
+                target_folder_name = brand
+                
+                if brand != "Unknown":
+                    # Κανόνας 1: Θέρμανση / Αέριο (Για ΟΛΕΣ τις μάρκες)
+                    if "BOILER" in doc_type or any(k in file_name.upper() for k in BOILER_KEYWORDS):
+                        target_folder_name = f"{brand} (Gas-Heating)"
+                    # Κανόνας 2: Εκπαίδευση (Για ΟΛΕΣ τις μάρκες)
+                    elif "TRAINING" in doc_type or any(k in file_name.upper() for k in TRAINING_KEYWORDS):
+                        target_folder_name = f"{brand} (Training)"
+                
+                # Δημιουργία Φακέλου αν δεν υπάρχει
+                if target_folder_name not in folder_cache:
+                    q = f"name = '{target_folder_name}' and '{root_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
                     res_b = service.files().list(q=q).execute()
-                    if res_b.get('files'): folder_cache[brand] = res_b.get('files')[0]['id']
+                    if res_b.get('files'): folder_cache[target_folder_name] = res_b.get('files')[0]['id']
                     else:
-                        meta = {'name': brand, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [root_folder_id]}
-                        folder_cache[brand] = service.files().create(body=meta, fields='id').execute().get('id')
+                        meta = {'name': target_folder_name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [root_folder_id]}
+                        folder_cache[target_folder_name] = service.files().create(body=meta, fields='id').execute().get('id')
                 
-                target_id = folder_cache.get(brand, review_folder_id)
+                target_id = folder_cache.get(target_folder_name, review_folder_id)
                 
                 # Μετακίνηση αρχείου
                 if target_id and target_id not in f.get('parents', []):
@@ -189,24 +219,54 @@ def run_full_maintenance(root_folder_id):
                 
                 new_index_data.append({
                     "id": file_id, "name": file_name, "brand": brand,
-                    "model": metadata["model"], "meta_type": metadata["type"],
-                    "status": "auto_verified" if brand != "Unknown" else "needs_review"
+                    "model": metadata["model"], "meta_type": doc_type,
+                    "status": "auto_verified"
                 })
                 processed_count += 1
                 time.sleep(0.3)
             
             subs = service.files().list(q=f"'{current_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false", fields="files(id, name)").execute()
             for s in subs.get('files', []):
-                if s['id'] != review_folder_id: folders_to_scan.append(s['id'])
+                if s['id'] != review_folder_id and s['name'] not in folder_cache: folders_to_scan.append(s['id'])
         except: pass
 
     with open(INDEX_FILE, "w", encoding="utf-8") as f: json.dump(new_index_data, f, indent=4)
-    status_box.update(label=f"🏁 Η συντήρηση ολοκληρώθηκε! Επεξεργάστηκαν: {processed_count}", state="complete")
+    status_box.update(label=f"🏁 Ολοκληρώθηκε! Επεξεργάστηκαν: {processed_count}", state="complete")
     return len(new_index_data)
 
+# --- 3. EXCEL CLEANER (TAKTOPOIHMENO) ---
 def get_stats_dataframe():
+    """Δημιουργεί ένα καθαρό DataFrame για Export με Links."""
     try:
-        # Χρησιμοποιούμε το pd που κάναμε import στην αρχή
-        with open(INDEX_FILE, "r", encoding="utf-8") as f:
-            return pd.DataFrame(json.load(f))
-    except: return None
+        with open(INDEX_FILE, "r", encoding="utf-8") as f: 
+            data = json.load(f)
+        
+        if not data: return None
+        
+        df = pd.DataFrame(data)
+        
+        # Καθαρισμός Στηλών
+        cols_to_keep = ['brand', 'model', 'meta_type', 'name', 'file_id']
+        df = df[[c for c in cols_to_keep if c in df.columns]]
+        
+        # Δημιουργία Clickable Link
+        if 'file_id' in df.columns:
+            df['Link'] = df['file_id'].apply(lambda x: f'https://drive.google.com/open?id={x}')
+        
+        # Μετονομασία σε Ελληνικά
+        df = df.rename(columns={
+            'brand': 'Μάρκα',
+            'model': 'Μοντέλο',
+            'meta_type': 'Τύπος',
+            'name': 'Όνομα Αρχείου',
+            'file_id': 'Google ID'
+        })
+        
+        # Ταξινόμηση
+        if 'Μάρκα' in df.columns:
+            df = df.sort_values(by=['Μάρκα', 'Μοντέλο'])
+            
+        return df
+
+    except Exception as e:
+        return None
