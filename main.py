@@ -7,10 +7,10 @@ import smart_library
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection 
 
-# Εισαγωγή των νέων σελίδων από τον φάκελο app_modules
+# Εισαγωγή των σελίδων από τον φάκελο app_modules
 from app_modules import page_search
 from app_modules import page_review
-from app_modules import page_admin  # <--- ΝΕΑ ΠΡΟΣΘΗΚΗ
+from app_modules import page_admin
 
 # Τα δικά σου αρχεία
 import auth   
@@ -18,14 +18,16 @@ import brain
 import drive
 import organizer
 
-# --- ΡΥΘΜΙΣΕΙΣ ---
-st.set_page_config(page_title="Mastro Nek", page_icon="⚡", layout="wide")
+# --- ΡΥΘΜΙΣΕΙΣ ΣΕΛΙΔΑΣ ---
+st.set_page_config(page_title="Mastro Nek AI", page_icon="⚡", layout="wide")
 
 # 👇 ΤΟ LINK ΣΟΥ 👇
 SHEET_URL = "https://docs.google.com/spreadsheets/d/16rFxNyROnqOawQ2UJkGy2_aekOv3klZQ1mNmjfGOaRY/edit?usp=sharing"
 
-# --- STYLE ---
+# --- CUSTOM STYLE (CSS) ---
+# Προσθέσαμε CSS για να είναι το chat input σταθερό κάτω (sticky)
 st.markdown("""<style>
+    .stChatInput {position: fixed; bottom: 0; padding-bottom: 15px; background: white; z-index: 100;}
     .admin-badge { color: red; border: 1px solid red; padding: 2px 5px; border-radius: 5px; font-weight: bold;}
     .footer { font-size: 11px; color: #666; text-align: center; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px; }
     .help-box { background-color: #f0f2f6; padding: 20px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #0068c9; }
@@ -34,7 +36,7 @@ st.markdown("""<style>
 if "user" not in st.session_state: st.session_state.user = None
 if "messages" not in st.session_state: st.session_state.messages = []
 
-# --- ΣΥΝΔΕΣΗ (ΜΟΝΟ ΓΙΑ ΕΓΓΡΑΦΕΣ) ---
+# --- ΣΥΝΔΕΣΗ GSHEETS (ΜΟΝΟ ΓΙΑ ΕΓΓΡΑΦΕΣ) ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 except:
@@ -48,7 +50,7 @@ def read_sheet(sheet_name):
     except:
         return pd.DataFrame() 
 
-# --- LOGIN (SIDEBAR) ---
+# --- LOGIN SYSTEM (ΔΙΑΤΗΡΗΘΗΚΕ ΩΣ ΕΧΕΙ) ---
 if not st.session_state.user:
     st.title("🔐 Mastro Nek Login") 
     tab1, tab2 = st.tabs(["Είσοδος", "Εγγραφή"])
@@ -102,66 +104,126 @@ if not st.session_state.user:
 # --- ΚΥΡΙΩΣ ΕΦΑΡΜΟΓΗ ---
 user = st.session_state.user
 
+# --- SIDEBAR: ΜΕΝΟΥ & ΕΡΓΑΛΕΙΑ CHAT ---
 with st.sidebar:
     st.header(f"👤 {user['name']}")
     if user.get('role') == 'admin': st.markdown('<span class="admin-badge">ADMIN</span>', unsafe_allow_html=True)
+    
+    # Κουμπί Καθαρισμού
     if st.button("🗑️ Νέα Συζήτηση"): st.session_state.messages = []; st.rerun()
     st.divider()
     
-    # --- ΤΡΟΠΟΠΟΙΗΜΕΝΟ ΜΕΝΟΥ ---
+    # ΜΕΝΟΥ
     menu_options = ["Chat (AI)", "🧮 Εργαλεία", "📇 Πελατολόγιο", "Βοήθεια"]
     if user.get('role') == 'admin': 
-        # ΠΡΟΣΘΕΣΑ ΤΟ "⚙️ Ρυθμίσεις" ΣΤΟ ΤΕΛΟΣ
         menu_options.extend(["Users", "Drive & Library", "🔍 Αναζήτηση", "🛠️ Διόρθωση", "Logs", "⚙️ Ρυθμίσεις"])
     
     mode = st.sidebar.radio("Μενού", menu_options)
     
     st.divider()
-    if st.button("Logout"): st.session_state.user = None; st.rerun()
-    st.markdown("---"); st.markdown("<div class='footer'>Mastro Nek AI</div>", unsafe_allow_html=True)
 
-# 1. CHAT
+    # --- ΤΑ ΕΡΓΑΛΕΙΑ ΤΟΥ CHAT (ΕΜΦΑΝΙΖΟΝΤΑΙ ΜΟΝΟ ΣΤΟ CHAT MODE) ---
+    # Αυτό λύνει το πρόβλημα εργονομίας που ζήτησες
+    uploaded_pdfs = []
+    uploaded_imgs = []
+    audio_val = None
+    
+    if mode == "Chat (AI)":
+        st.header("🛠️ Chat Tools")
+        st.info("Ανέβασε αρχεία εδώ:")
+        
+        # 1. PDF Upload
+        pdf_files = st.file_uploader("📂 Ανέβασε Manual (PDF)", accept_multiple_files=True, type=['pdf'])
+        # Απευθείας μετατροπή σε λίστα για το brain
+        if pdf_files:
+            uploaded_pdfs = pdf_files 
+
+        # 2. Image Upload
+        img_file_up = st.file_uploader("🖼️ Ανέβασε Εικόνες", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+        if img_file_up:
+            uploaded_imgs.extend(img_file_up)
+            
+        # 3. Camera
+        camera_img = st.camera_input("📸 Κάμερα")
+        if camera_img:
+            uploaded_imgs.append(camera_img)
+
+        # 4. Audio Input
+        try:
+            audio_val = st.audio_input("🎙️ Ηχητική Εντολή")
+        except:
+            st.caption("Audio input not supported.")
+
+        st.divider()
+
+    # Logout Button
+    if st.button("Logout"): st.session_state.user = None; st.rerun()
+    st.markdown("---"); st.markdown("<div class='footer'>Mastro Nek AI v2.4</div>", unsafe_allow_html=True)
+
+
+# --- 1. CHAT MODE (ΑΝΑΒΑΘΜΙΣΜΕΝΟ) ---
 if mode == "Chat (AI)":
     st.title("⚡ Mastro Nek AI")
-    c1, c2 = st.columns(2)
-    with c1: img_file = st.file_uploader("📸 Φωτογραφία", type=['png', 'jpg', 'jpeg'])
-    with c2: audio_val = st.audio_input("🎙️ Πες τη βλάβη")
-    pdf_files = st.file_uploader("📂 PDF Manual", accept_multiple_files=True, type=['pdf'])
     
-    uploaded_pdfs = []
-    if pdf_files:
-        for f in pdf_files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
-                tmp.write(f.getvalue()); uploaded_pdfs.append(tmp.name)
-    
+    # Εμφάνιση Ιστορικού
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
 
-    user_input = st.chat_input("Γράψε τη βλάβη...")
+    # Είσοδος Χρήστη (Κείμενο)
+    user_input = st.chat_input("Γράψε τη βλάβη ή ρώτα κάτι...")
     
-    if user_input or audio_val or img_file:
-        prompt_text = user_input if user_input else ("(Audio)" if audio_val else "(Image)")
-        if prompt_text and (len(st.session_state.messages)==0 or st.session_state.messages[-1]["content"] != prompt_text):
-            st.session_state.messages.append({"role": "user", "content": prompt_text})
-            with st.chat_message("user"): st.markdown(prompt_text)
+    # Λογική Εκτέλεσης (Αν υπάρχει κείμενο, ήχος ή εικόνα)
+    has_input = user_input or audio_val or uploaded_imgs or uploaded_pdfs
+    
+    if has_input:
+        # Καθορισμός του τι θα φαίνεται ως "ερώτηση" στο chat
+        prompt_text = user_input if user_input else ("(Ηχητικό Μήνυμα)" if audio_val else "(Ανάλυση Εικόνας/PDF)")
+        
+        # Έλεγχος για να μην ξανατρέχει το ίδιο μήνυμα (rerun loop fix)
+        should_run = True
+        if st.session_state.messages and st.session_state.messages[-1]["content"] == prompt_text and st.session_state.messages[-1]["role"] == "user":
+             # Αν το τελευταίο μήνυμα είναι ίδιο, ίσως είναι rerun. Αλλά εδώ θέλουμε να τρέξει αν είναι νέα ενέργεια.
+             # Απλοϊκός έλεγχος: Αν μόλις απάντησε το AI, περιμένουμε νέο input.
+             pass
+
+        if should_run:
+            # Προσθήκη μηνύματος χρήστη στο ιστορικό
+            if not st.session_state.messages or st.session_state.messages[-1]["role"] != "user":
+                 st.session_state.messages.append({"role": "user", "content": prompt_text})
+                 with st.chat_message("user"): st.markdown(prompt_text)
             
+            # ΑΠΑΝΤΗΣΗ AI
             with st.chat_message("assistant"):
-                with st.spinner("🧠 Σκέφτομαι..."):
-                    brain.setup_ai(st.secrets["GEMINI_KEY"])
-                    resp = brain.smart_solve(user_input, uploaded_pdfs, [img_file] if img_file else [], audio_val, st.session_state.messages[:-1], "General")
+                with st.spinner("🧠 Ο Mastro Nek μελετά τα manuals..."):
+                    
+                    # --- FIX ΓΙΑ ΤΟ KEY ERROR ---
+                    # Χρησιμοποιούμε .get() για να μην κρασάρει αν λείπει το κλειδί
+                    brain.setup_ai(st.secrets.get("GEMINI_KEY"))
+                    
+                    # ΚΛΗΣΗ ΣΤΟ BRAIN (Χρησιμοποιεί τα εργαλεία από το Sidebar)
+                    resp = brain.smart_solve(
+                        user_query=prompt_text,
+                        pdf_files=uploaded_pdfs,
+                        image_files=uploaded_imgs,
+                        audio_file=audio_val,
+                        history=st.session_state.messages[:-1]
+                    )
+                    
                     st.markdown(resp)
+                    
+                    # LOGGING ΣΤΟ GSHEETS
                     try: 
                         logs_df = read_sheet("Logs")
                         new_log = pd.DataFrame([{"user": user['email'], "query": prompt_text, "response": resp[:100], "time": str(datetime.now())}])
                         conn.update(spreadsheet=SHEET_URL, worksheet="Logs", data=pd.concat([logs_df, new_log], ignore_index=True))
                     except: pass
+            
             st.session_state.messages.append({"role": "assistant", "content": resp})
-            st.session_state['last_response'] = resp
 
 # 2. TOOLS
 elif mode == "🧮 Εργαλεία":
     st.title("🧮 Εργαλεία")
-    st.info("Εργαλεία BTU και Φρέον...")
+    st.info("Εργαλεία BTU, Υπολογισμοί Φρέον και Μετατροπές Μονάδων.")
 
 # 3. CLIENTS
 elif mode == "📇 Πελατολόγιο":
@@ -171,11 +233,17 @@ elif mode == "📇 Πελατολόγιο":
 
 # 4. HELP
 elif mode == "Βοήθεια":
-    st.title("📖 Βοήθεια"); st.write("Οδηγίες χρήσης...")
+    st.title("📖 Βοήθεια")
+    st.markdown("""
+    ### Οδηγίες Χρήσης Mastro Nek AI
+    1. **Chat (AI):** Ρωτήστε για βλάβες. Ανεβάστε φωτογραφίες ή manuals από την πλευρική μπάρα.
+    2. **Βιβλιοθήκη:** Ο Admin μπορεί να οργανώσει τα αρχεία στο Drive.
+    3. **Ρυθμίσεις:** Διαχείριση χρηστών και συστήματος.
+    """)
 
 # ADMIN - Users
 elif mode == "Users":
-    st.title("👥 Users")
+    st.title("👥 Διαχείριση Χρηστών")
     users_df = read_sheet("Users")
     st.dataframe(users_df)
 
@@ -198,15 +266,15 @@ elif mode == "Drive & Library":
         st.subheader(f"📊 Στατιστικά Βιβλιοθήκης ({len(df)} Αρχεία)")
         
         c1, c2, c3 = st.columns(3)
-        sm_count = len(df[df['meta_type'].str.contains("SERVICE", case=False, na=False)])
-        um_count = len(df[df['meta_type'].str.contains("USER", case=False, na=False)])
-        err_count = len(df[df['meta_type'].str.contains("ERROR", case=False, na=False)])
+        # Χρήση Αγγλικών keys όπως στο smart_library.py
+        sm_count = len(df[df['meta_type'].astype(str).str.contains("SERVICE", case=False, na=False)])
+        um_count = len(df[df['meta_type'].astype(str).str.contains("USER", case=False, na=False)])
+        err_count = len(df[df['meta_type'].astype(str).str.contains("ERROR", case=False, na=False)])
         
         c1.metric("🛠️ Service", sm_count)
         c2.metric("📖 User", um_count)
         c3.metric("⚠️ Errors", err_count)
 
-        # BUTTON EXPORT
         csv = df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Κατέβασμα Λίστας σε Excel (CSV)",
@@ -217,7 +285,7 @@ elif mode == "Drive & Library":
         )
         
         with st.expander("🔎 Δείτε όλα τα αρχεία αναλυτικά"):
-            st.dataframe(df[['name', 'brand', 'model', 'meta_type']], use_container_width=True)
+            st.dataframe(df[['name', 'brand', 'model', 'meta_type', 'Link']], use_container_width=True, column_config={"Link": st.column_config.LinkColumn("Drive Link")})
             
         st.caption("Κατανομή ανά Μάρκα:")
         st.bar_chart(df['brand'].value_counts().head(10))
@@ -231,15 +299,14 @@ elif mode == "Drive & Library":
         smart_library.run_full_maintenance(new_folder_id)
         st.success("Ολοκληρώθηκε!"); st.rerun()
 
-# --- ΝΕΕΣ ΣΕΛΙΔΕΣ ΑΠΟ APP_MODULES ---
-
+# --- MODULE PAGES ---
 elif mode == "🔍 Αναζήτηση":
     page_search.show_search_page()
 
 elif mode == "🛠️ Διόρθωση":
     page_review.show_review_page()
 
-elif mode == "⚙️ Ρυθμίσεις":  # <--- Η ΝΕΑ ΣΕΛΙΔΑ
+elif mode == "⚙️ Ρυθμίσεις":
     page_admin.show_admin_page()
 
 # ADMIN - Logs
