@@ -1,11 +1,10 @@
 """
-CORE MODULE: AI ENGINE (BRAIN) - SELF HEALING & PERSONA
--------------------------------------------------------
-Features:
-1. AUTO-DISCOVERY: Finds available models automatically (Fixes 404 errors).
-2. Mastro Nek Persona: Strict HVAC Expert for Chat.
-3. Deep Librarian Logic: For the AI Organizer.
-4. Language Enforcement: Greek/English.
+CORE MODULE: AI ENGINE (BRAIN) - SENIOR TECHNICIAN EDITION
+----------------------------------------------------------
+Updates:
+- System Persona upgraded to "Senior Field Engineer".
+- Instructions for deep troubleshooting steps (not just summary).
+- Mandate to use specific parameters and technical values from manuals.
 """
 
 import google.generativeai as genai
@@ -39,75 +38,67 @@ class AIEngine:
             logger.critical(f"AI Setup Error: {e}")
 
     def _find_best_model(self):
-        """
-        Ρωτάει την Google ποια μοντέλα είναι διαθέσιμα και διαλέγει το καλύτερο.
-        """
+        """Εύρεση διαθέσιμου μοντέλου (Auto-Discovery)."""
         try:
-            # 1. Λήψη λίστας διαθέσιμων μοντέλων
             available_models = []
             for m in genai.list_models():
                 if 'generateContent' in m.supported_generation_methods:
                     available_models.append(m.name)
             
-            # 2. Λίστα Προτεραιότητας (Ψάχνουμε με αυτή τη σειρά)
-            # Προτιμάμε το 1.5 Flash για ταχύτητα, μετά το Pro, μετά το απλό 1.0
             priorities = [
+                "models/gemini-1.5-pro-latest", # Προτιμάμε το PRO για ανάλυση βάθους
+                "models/gemini-1.5-pro",
                 "models/gemini-1.5-flash",
                 "models/gemini-1.5-flash-latest",
-                "models/gemini-1.5-flash-001",
-                "models/gemini-1.5-pro",
-                "models/gemini-1.5-pro-latest",
                 "models/gemini-pro"
             ]
 
-            # 3. Έλεγχος αν υπάρχει κάποιο από τα αγαπημένα μας
             for priority in priorities:
                 if priority in available_models:
                     return priority
             
-            # 4. Fallback: Αν δεν βρούμε κανένα γνωστό, παίρνουμε το πρώτο διαθέσιμο "gemini"
             for m in available_models:
-                if "gemini" in m:
-                    return m
+                if "gemini" in m: return m
             
-            # 5. Απόλυτη λύση ανάγκης
             return "models/gemini-pro"
             
         except Exception as e:
             logger.error(f"Model Discovery Failed: {e}")
-            return "models/gemini-pro" # Default safe choice
+            return "models/gemini-pro"
 
     def analyze_content(self, prompt, context_text="", image=None, lang="gr"):
         """
-        ΛΕΙΤΟΥΡΓΙΑ 1: CHAT (Με Προσωπικότητα)
+        ΛΕΙΤΟΥΡΓΙΑ 1: CHAT (SENIOR TECH PERSONA)
         """
-        if not self.model: return "⚠️ AI System Offline (Model not loaded)."
+        if not self.model: return "⚠️ AI System Offline."
 
-        # Επιλογή Γλώσσας
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # System Prompt (Ταυτότητα)
+        # Η ΝΕΑ, ΒΕΛΤΙΩΜΕΝΗ ΠΡΟΣΩΠΙΚΟΤΗΤΑ
         system_persona = f"""
         INSTRUCTIONS:
-        You are 'Mastro Nek', an expert HVAC Technician Assistant.
-        
+        You are 'Mastro Nek', an Elite HVAC Technical Support Specialist suitable for enterprise use.
+        You are talking to a professional technician on the field, not a homeowner.
+
         STRICT RULES:
-        1. LANGUAGE: You MUST answer ONLY in {target_lang}.
-        2. DOMAIN: You answer ONLY about Heating, Cooling, Boilers, Heat Pumps, and Hydraulic systems.
-        3. CONTEXT: 
-           - If user says "Clas One", they refer to "Ariston Clas One Boiler".
-           - If user says "Error 104" (for Ariston), it means "Poor Circulation/Pump issue".
-           - Ignore unrelated topics like VPNs, Semiconductor design, or Cisco.
-        4. TONE: Professional, technical, concise. Use bullet points for solutions.
+        1. LANGUAGE: Answer ONLY in {target_lang}.
+        2. DEPTH: Do NOT be brief. Provide comprehensive, step-by-step technical analysis.
+        3. SOURCES: Combine the provided Manuals (Context) with your general engineering knowledge.
+           - If the manual mentions specific Parameters (e.g., P 2.4.1), Safety Menus, or PCB Voltages, YOU MUST CITE THEM.
+        4. STRUCTURE:
+           - **Technical Diagnosis**: What specifically triggered the sensor?
+           - **Probable Causes**: List from most common to rare (e.g., Pump, PCB, Wiring, Air).
+           - **Step-by-Step Troubleshooting**: Numbered actions (Measure X, Check Y, Clean Z).
+           - **Parameters/Settings**: Mention relevant service menu settings.
         
-        USER CONTEXT DATA (Manuals found):
-        {context_text[:20000]}
+        CONTEXT DATA (Library Content):
+        {context_text[:25000]}
         """
 
         try:
             contents = [system_persona]
             if image: contents.append(image)
-            contents.append(f"USER QUESTION: {prompt}")
+            contents.append(f"USER TECHNICAL QUERY: {prompt}")
 
             response = self.model.generate_content(contents)
             return response.text
@@ -116,7 +107,7 @@ class AIEngine:
 
     def extract_metadata_from_text(self, text, filename):
         """
-        ΛΕΙΤΟΥΡΓΙΑ 2: ORGANIZER (Βιβλιοθηκονόμος)
+        ΛΕΙΤΟΥΡΓΙΑ 2: ORGANIZER (LIBRARIAN)
         """
         if not self.model: return "Unsorted|Unknown|Unknown|Manual"
 
@@ -131,21 +122,12 @@ class AIEngine:
         YOUR TASK: Classify this document into 4 levels.
         
         1. CATEGORY: [Boilers, AirConditioners, HeatPumps, Solar, WaterHeaters, Controllers, Underfloor, Tools, Other]
-        2. BRAND: The manufacturer (e.g. Ariston, Daikin, Mitsubishi). If unknown, use "Unknown".
-        3. MODEL: The specific model series (e.g. Clas One, Altherma 3, Alterra). If general, use "General".
-        4. TYPE: What kind of document is this? Choose strictly one:
-           - [ServiceManual] (Technical repair guide, error codes, dismantling)
-           - [UserManual] (Instructions for the end user)
-           - [InstallationManual] (For installers, dimensions, piping)
-           - [WiringDiagram] (Electrical schematics only)
-           - [SpareParts] (Exploded views, part codes)
-           - [Certificates] (CE, Declaration of conformity)
-           - [Brochure] (Marketing material)
+        2. BRAND: Manufacturer (e.g. Ariston, Daikin). If unknown, use "Unknown".
+        3. MODEL: Specific model series (e.g. Clas One). If general, use "General".
+        4. TYPE: Choose strictly one: [ServiceManual, UserManual, InstallationManual, WiringDiagram, SpareParts, Certificates, Brochure]
 
         OUTPUT FORMAT: CATEGORY|BRAND|MODEL|TYPE
-        EXAMPLE: Boilers|Ariston|Clas One|ServiceManual
-        
-        CRITICAL: If you cannot identify the Brand or Category with high confidence, output: MANUAL_REVIEW
+        CRITICAL: If uncertain, output: MANUAL_REVIEW
         """
         
         try:
