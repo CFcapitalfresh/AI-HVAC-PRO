@@ -1,11 +1,10 @@
 """
-CORE MODULE: AI ENGINE (BRAIN) - TITANIUM EDITION
--------------------------------------------------
-Features:
-1. CHAT MEMORY: Handles full conversation history.
-2. SOURCE AWARENESS: Knows which manuals are available.
-3. PERSONA REFINEMENT: Accepts technical corrections immediately.
-4. AUTO-DISCOVERY: Finds best Google Model.
+CORE MODULE: AI ENGINE (BRAIN) - SAFETY FIRST EDITION
+-----------------------------------------------------
+Updates:
+- STRICT SAFETY PROTOCOL: Warns user if specific manual is missing.
+- Verification Logic: Checks match between User Query and Context Files.
+- Auto-Discovery: Finds the best available Gemini model automatically.
 """
 
 import google.generativeai as genai
@@ -21,72 +20,79 @@ class AIEngine:
         self._setup()
 
     def _setup(self):
-        if not self.api_key: return
+        """Αρχική ρύθμιση με αυτόματη εύρεση μοντέλου."""
+        if not self.api_key:
+            logger.critical("AI Setup Failed: No API Key.")
+            return
+        
         try:
             genai.configure(api_key=self.api_key)
             best_model = self._find_best_model()
+            logger.info(f"✅ AI selected model: {best_model}")
             self.model = genai.GenerativeModel(best_model)
         except Exception as e:
             logger.critical(f"AI Setup Error: {e}")
 
     def _find_best_model(self):
-        """Auto-discovery of best available model."""
+        """Βρίσκει το καλύτερο διαθέσιμο μοντέλο για να αποφύγει τα 404 errors."""
         try:
             available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            
+            # Λίστα προτεραιότητας
             priorities = [
                 "models/gemini-1.5-pro-latest", 
                 "models/gemini-1.5-pro", 
                 "models/gemini-1.5-flash",
+                "models/gemini-1.5-flash-latest",
                 "models/gemini-pro"
             ]
+            
             for p in priorities:
                 if p in available: return p
+            
             return available[0] if available else "models/gemini-pro"
         except: return "models/gemini-pro"
 
     def get_chat_response(self, chat_history, context_files="", lang="gr"):
         """
-        Εκτελεί συνομιλία λαμβάνοντας υπόψη όλο το ιστορικό.
-        Args:
-            chat_history: Λίστα με μηνύματα [{'role': 'user', 'content': '...'}, ...]
-            context_files: Λίστα με τα ονόματα των manual που βρέθηκαν.
+        Εκτελεί τη συνομιλία με το Πρωτόκολλο Ασφαλείας.
         """
         if not self.model: return "⚠️ AI System Offline."
 
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # Η ΝΕΑ "ΤΑΠΕΙΝΗ" & ΕΞΥΠΝΗ ΠΡΟΣΩΠΙΚΟΤΗΤΑ
+        # --- ΤΟ ΝΕΟ ΑΥΣΤΗΡΟ ΠΡΩΤΟΚΟΛΛΟ ΑΣΦΑΛΕΙΑΣ ---
         system_instruction = f"""
         ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
         
-        STRICT RULES:
-        1. LANGUAGE: Answer ONLY in {target_lang}.
-        2. CONTEXT: The user has these manuals available: {context_files}. 
-           - Suggest checking them if relevant.
-        3. ADAPTABILITY: **CRITICAL**: If the user corrects you technically (e.g., "This model has no pressure switch"), ACCEPT IT IMMEDIATELY. 
-           - Say: "You are correct, my apologies."
-           - Then re-evaluate the diagnosis based on the user's correction. 
-           - DO NOT argue or repeat generic advice that contradicts the user.
-        4. TONE: Professional, technical, structured (Diagnosis -> Causes -> Steps).
+        CONTEXT DATA (Library Files Found): {context_files}
+        
+        SAFETY PROTOCOL (CRITICAL RULES):
+        1. **MATCH CHECK**: Check if the User's requested Model Name exists in the 'CONTEXT DATA' filenames provided above.
+        2. **MISSING MANUAL WARNING**: 
+           - If the specific manual for the requested model is NOT in the context data, you MUST start your response with: 
+             "⚠️ **Προσοχή:** Δεν βρέθηκε το συγκεκριμένο εγχειρίδιο στη Βιβλιοθήκη. Η απάντηση βασίζεται σε γενική εμπειρία και ενδέχεται να διαφέρει ανά έκδοση."
+           - In this case, do NOT state error codes as absolute facts. Use phrases like "Usually refers to..." or "In similar models...".
+        3. **CORRECTIONS**: If the user corrects you technically (e.g., "It has no pressure switch"), accept it immediately ("You are correct, apologies") and adjust your diagnosis.
+        4. **DEPTH**: Be technical, structured (Diagnosis -> Causes -> Steps), and professional.
+        
+        LANGUAGE: Answer ONLY in {target_lang}.
         """
 
         try:
-            # Μετατροπή του History σε format Gemini
+            # Δημιουργία ιστορικού για το Gemini
             gemini_history = []
             
-            # Πρώτα βάζουμε την προσωπικότητα ως "system" οδηγία (ή user prompt στην αρχή)
+            # 1. System Prompt (Η Ταυτότητα & Οι Κανόνες)
             gemini_history.append({"role": "user", "parts": [system_instruction]})
-            gemini_history.append({"role": "model", "parts": ["Understood. I am Mastro Nek. I am ready."]})
+            gemini_history.append({"role": "model", "parts": ["Understood. I am Mastro Nek. I will follow the Safety Protocol strictly."]})
 
-            # Μετά προσθέτουμε τη συζήτηση
+            # 2. Προσθήκη ιστορικού συζήτησης
             for msg in chat_history:
                 role = "user" if msg["role"] == "user" else "model"
                 gemini_history.append({"role": role, "parts": [msg["content"]]})
 
-            # Στέλνουμε το τελευταίο μήνυμα (που είναι ήδη στο history) μέσω start_chat; 
-            # Όχι, το Gemini ChatSession θέλει το history ΧΩΡΙΣ το τελευταίο μήνυμα, και μετά send_message.
-            
-            # Λύση για robustness: Χρησιμοποιούμε generate_content με όλο το πακέτο
+            # 3. Λήψη απάντησης
             response = self.model.generate_content(gemini_history)
             return response.text
             
@@ -94,9 +100,31 @@ class AIEngine:
             return f"⚠️ AI Error: {str(e)}"
 
     def extract_metadata_from_text(self, text, filename):
-        """Organizer Logic (Παραμένει ίδια)."""
+        """Λειτουργία για τον AI Organizer (Βιβλιοθηκονόμος)."""
         if not self.model: return "Unsorted|Unknown|Unknown|Manual"
-        sys_prompt = f"Analyze HVAC Manual: {filename}\n{text[:15000]}\nOutput: CATEGORY|BRAND|MODEL|TYPE"
+
+        sys_prompt = f"""
+        ACT AS AN HVAC EXPERT LIBRARIAN.
+        Analyze the text from this document.
+        
+        FILENAME: {filename}
+        TEXT CONTENT SAMPLE:
+        {text[:15000]}
+
+        YOUR TASK: Classify this document into 4 levels.
+        
+        1. CATEGORY: [Boilers, AirConditioners, HeatPumps, Solar, WaterHeaters, Controllers, Underfloor, Tools, Other]
+        2. BRAND: Manufacturer (e.g. Ariston, Daikin). If unknown, use "Unknown".
+        3. MODEL: Specific model series (e.g. Clas One). If general, use "General".
+        4. TYPE: Choose strictly one: [ServiceManual, UserManual, InstallationManual, WiringDiagram, SpareParts, Certificates, Brochure]
+
+        OUTPUT FORMAT: CATEGORY|BRAND|MODEL|TYPE
+        CRITICAL: If uncertain, output: MANUAL_REVIEW
+        """
+        
         try:
-            return self.model.generate_content(sys_prompt).text
-        except: return "Unsorted|Unknown|Unknown|Manual"
+            response = self.model.generate_content(sys_prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Organizer AI Error: {e}")
+            return "Unsorted|Unknown|Unknown|Manual"
