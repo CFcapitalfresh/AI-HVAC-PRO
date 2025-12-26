@@ -1,34 +1,99 @@
 # Αρχείο: brain.py
-# ΕΚΔΟΣΗ: 2.2.0 - CROSS-REFERENCE EDITION
+# ΕΚΔΟΣΗ: 2.3.0 - ULTIMATE ROBUST (FULL FEATURES + MOBILE FIX + CROSS REFERENCE)
 
 import google.generativeai as genai
-import PIL.Image
-import os
+import time
 import json
-import pandas as pd
+import os
+import drive 
+import streamlit as st
 import pypdf
+import organizer
+from google.api_core import exceptions
 import re
-import drive
+from PIL import Image # Για τις εικόνες
 
+# --- ΡΥΘΜΙΣΕΙΣ ---
 INDEX_FILE = "drive_index.json"
+ACTIVE_MODEL_NAME = None
+LAST_ERROR = ""
+
+# Ρυθμίσεις ασφαλείας (Διατηρήθηκαν από τον παλιό κώδικα)
+SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
 
 def setup_ai(api_key):
-    if api_key:
-        genai.configure(api_key=api_key)
+    """
+    Ρύθμιση του AI με διαχείριση σφαλμάτων για κινητά και Cloud.
+    """
+    global ACTIVE_MODEL_NAME, LAST_ERROR
+    
+    # 1. Έλεγχος αν το κλειδί είναι κενό ή None
+    if not api_key: 
+        # Προσπάθεια ανάκτησης από το περιβάλλον (Fallback για mobile)
+        api_key = os.environ.get("GEMINI_KEY")
+        if not api_key:
+            try:
+                api_key = st.secrets.get("GEMINI_KEY")
+            except: pass
+            
+        if not api_key:
+            LAST_ERROR = "No API Key provided. Please check Streamlit Secrets."
+            return
 
-def find_best_model():
-    """Επιλέγει δυναμικά το μοντέλο για αποφυγή σφαλμάτων 404."""
     try:
+        genai.configure(api_key=api_key)
+        
+        # 2. Εύρεση του καλύτερου μοντέλου (Logic από τον παλιό κώδικα + Νέα μοντέλα)
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for pref in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-2.0-flash-exp']:
-            if pref in available_models: return pref
-        return available_models[0]
-    except: return 'gemini-1.5-flash'
+        
+        # Προτεραιότητα: Flash 1.5 (Γρήγορο/Stable) -> Pro 1.5 -> Παλιά
+        preferred_order = [
+            "models/gemini-1.5-flash", 
+            "models/gemini-1.5-pro",
+            "models/gemini-2.0-flash-exp",
+            "gemini-1.5-flash"
+        ]
+        
+        selected_model = None
+        for p in preferred_order:
+            if p in available_models:
+                selected_model = p
+                break
+        
+        if not selected_model and available_models:
+            selected_model = available_models[0]
+            
+        ACTIVE_MODEL_NAME = selected_model
+        # print(f"DEBUG: Active Model set to {ACTIVE_MODEL_NAME}")
+
+    except Exception as e:
+        LAST_ERROR = f"Setup Error: {str(e)}"
+        print(LAST_ERROR)
+
+def extract_text_from_pdf(file_path, max_pages=15):
+    """Βοηθητική συνάρτηση για ασφαλή ανάγνωση PDF."""
+    text = ""
+    try:
+        reader = pypdf.PdfReader(file_path)
+        count = len(reader.pages)
+        limit = min(count, max_pages)
+        for i in range(limit):
+            page_text = reader.pages[i].extract_text()
+            if page_text:
+                text += f"\n--- Page {i+1} ---\n{page_text}"
+    except Exception as e:
+        print(f"Error reading PDF {file_path}: {e}")
+    return text
 
 def load_comprehensive_context(user_query):
     """
-    Εντοπίζει ΟΛΑ τα σχετικά αρχεία για τη μάρκα/μοντέλο 
-    ώστε το AI να έχει πλήρη εικόνα της βιβλιοθήκης.
+    ΝΕΑ ΛΕΙΤΟΥΡΓΙΑ: Εντοπίζει ΟΛΑ τα σχετικά αρχεία για τη μάρκα/μοντέλο 
+    ώστε το AI να κάνει Cross-Reference (Διασταύρωση).
     """
     context = ""
     try:
@@ -38,85 +103,133 @@ def load_comprehensive_context(user_query):
                 
                 # Εντοπισμός μάρκας από την ερώτηση
                 detected_brand = ""
+                # Απλή αναζήτηση μάρκας
                 for entry in db:
-                    if entry['brand'].lower() in user_query.lower():
+                    if entry['brand'].lower() in user_query.lower() and entry['brand'] != "Unknown":
                         detected_brand = entry['brand']
                         break
                 
                 if detected_brand:
                     relevant = [e for e in db if e['brand'] == detected_brand]
-                    context = f"\n--- ΔΙΑΘΕΣΙΜΑ ΕΓΧΕΙΡΙΔΙΑ ΓΙΑ {detected_brand.upper()} ---\n"
+                    context = f"\n--- ΒΡΕΘΗΚΑΝ ΣΤΗ ΒΙΒΛΙΟΘΗΚΗ ΤΑ ΕΞΗΣ MANUAL ΓΙΑ {detected_brand.upper()} ---\n"
+                    # Κατηγοριοποίηση για το AI
                     for item in relevant:
-                        context += f"- [{item['meta_type']}]: {item['name']}\n"
-                    context += "\nΟΔΗΓΙΑ: Χρησιμοποίησε συνδυαστικά πληροφορίες από τα παραπάνω αν χρειαστεί.\n"
-    except: pass
+                        context += f"- Τύπος: [{item['meta_type']}] | Αρχείο: {item['name']}\n"
+                    
+                    context += "\nΟΔΗΓΙΑ ΠΡΟΣ AI: Χρησιμοποίησε συνδυαστικά πληροφορίες από τα παραπάνω (Service, Installation, Electric) για να δώσεις πλήρη εικόνα.\n"
+    except Exception as e:
+        print(f"Library Context Error: {e}")
     return context
 
-def smart_solve(user_query, pdf_paths, img_files, audio_file, history, mode="General"):
+def smart_solve(user_query, pdf_files, image_files, audio_file, history, mode="General"):
+    """
+    Η ΚΥΡΙΑ ΣΥΝΑΡΤΗΣΗ ΤΟΥ ΕΓΚΕΦΑΛΟΥ.
+    Συνδυάζει: Κείμενο, Ήχο, Εικόνα, PDF Chat, PDF Βιβλιοθήκης.
+    """
+    global ACTIVE_MODEL_NAME
+    
+    # Έλεγχος αν έχουμε μοντέλο
+    if not ACTIVE_MODEL_NAME:
+        # Προσπάθεια ανάκτησης κλειδιού τελευταία στιγμή (για mobile)
+        key = st.secrets.get("GEMINI_KEY")
+        if key: setup_ai(key)
+        
+        if not ACTIVE_MODEL_NAME:
+            return "⚠️ Σφάλμα Σύνδεσης: Δεν έχει οριστεί το AI Model. Ελέγξτε το API Key."
+
     try:
-        selected_model = find_best_model()
-        model = genai.GenerativeModel(selected_model)
-        
-        # Φόρτωση σφαιρικού πλαισίου (Cross-Reference)
+        model = genai.GenerativeModel(
+            model_name=ACTIVE_MODEL_NAME,
+            safety_settings=SAFETY_SETTINGS
+        )
+
+        content_parts = []
+
+        # 1. Φόρτωση Πλαισίου Βιβλιοθήκης (Cross-Reference)
         library_context = load_comprehensive_context(user_query)
+
+        # 2. System Instruction (Ο Ρόλος του Mastro Nek)
+        system_prompt = f"""
+        Είσαι ο 'Mastro Nek AI', ένας έμπειρος Senior Τεχνικός HVAC (Θέρμανση, Κλιματισμός, Αέριο).
         
-        system_instruction = f"""
-        Είσαι ο 'Mastro Nek AI', ένας Senior HVAC Expert.
-        
-        ΣΤΡΑΤΗΓΙΚΗ ΑΝΑΛΥΣΗΣ:
-        1. ΣΥΝΔΥΑΣΤΙΚΗ ΣΚΕΨΗ: Μην βασίζεσαι σε ένα μόνο έγγραφο. Αν για μια βλάβη (π.χ. Error 104) το Service Manual μιλά για κυκλοφορία και το Installation Manual δείχνει τη θέση της αντλίας, σύνθεσε τις πληροφορίες.
-        2. ΔΙΑΣΤΑΥΡΩΣΗ: Αν ένα έγγραφο (π.χ. Electric Diagram) δεν επαρκεί για την ερμηνεία μιας βλάβης, ανάφερέ το και χρησιμοποίησε τη γενική τεχνική σου γνώση για να συμπληρώσεις τα κενά.
-        3. ΑΝΑΦΟΡΑ ΠΗΓΩΝ: Αν η απάντηση προέρχεται από 2 ή 3 διαφορετικά manuals, ανάφερέ τα όλα.
-        4. ΤΕΧΝΙΚΗ ΑΚΡΙΒΕΙΑ: Δώσε έμφαση στις λεπτομέρειες που κάνουν τη διαφορά (π.χ. ρυθμίσεις παραμέτρων, έλεγχος αισθητήρων NTC).
+        ΟΔΗΓΙΕΣ ΑΝΑΛΥΣΗΣ:
+        1. ΣΥΝΔΥΑΣΤΙΚΗ ΣΚΕΨΗ: Μην βασίζεσαι σε ένα μόνο έγγραφο. Αν για μια βλάβη (π.χ. Error 104) το Service Manual μιλά για κυκλοφορία και το Installation Manual δείχνει την αντλία, σύνθεσε τις πληροφορίες.
+        2. ΤΕΧΝΙΚΗ ΑΝΑΛΥΣΗ: Εξήγησε ΤΙ φταίει και ΓΙΑΤΙ. Δώσε βήματα ελέγχου (1, 2, 3...).
+        3. ΑΣΦΑΛΕΙΑ: Πάντα να προειδοποιείς για ρεύμα/αέριο.
+        4. ΑΝΑΦΟΡΑ ΠΗΓΩΝ: Αν βρήκες τη λύση σε συγκεκριμένο manual, γράψε το όνομά του.
         
         {library_context}
         """
-        
-        contents = [system_instruction]
+        content_parts.append(system_prompt)
+
+        # 3. Ιστορικό Συνομιλίας
         if history:
+            history_text = "\nΙΣΤΟΡΙΚΟ ΣΥΖΗΤΗΣΗΣ:\n"
             for msg in history[-6:]:
-                contents.append(f"{msg['role'].upper()}: {msg['content']}")
+                role = "ΧΡΗΣΤΗΣ" if msg["role"] == "user" else "MASTRO NEK"
+                history_text += f"{role}: {msg['content']}\n"
+            content_parts.append(history_text)
 
-        # Επεξεργασία Πολυμέσων (Ήχος/Εικόνα)
+        # 4. Διαχείριση Ήχου (Διατηρήθηκε η παλιά λογική)
         if audio_file:
-            contents.append({"mime_type": "audio/wav", "data": audio_file.read() if hasattr(audio_file, 'read') else audio_file})
-        if img_files:
-            for img in img_files:
-                if img: contents.append(PIL.Image.open(img))
+            # Το Gemini Flash υποστηρίζει ήχο. Τον στέλνουμε ως blob.
+            try:
+                audio_bytes = audio_file.getvalue()
+                content_parts.append({
+                    "mime_type": "audio/wav", # Ή audio/mp3, το Gemini συνήθως το βρίσκει
+                    "data": audio_bytes
+                })
+                content_parts.append("Ανάλυσε τον ήχο της βλάβης ή την φωνητική ερώτηση.")
+            except Exception as e:
+                content_parts.append(f"Σφάλμα φόρτωσης ήχου: {e}")
 
-        # Ανάλυση PDF (Ανέβασμα από τον χρήστη)
-        if pdf_paths:
-            combined_pdf_text = ""
-            for path in pdf_paths:
-                try:
-                    reader = pypdf.PdfReader(path)
-                    for i in range(min(15, len(reader.pages))):
-                        combined_pdf_text += f"--- Από αρχείο {os.path.basename(path)} ---\n"
-                        combined_pdf_text += reader.pages[i].extract_text() + "\n"
-                except: pass
-            contents.append(f"ΠΕΡΙΕΧΟΜΕΝΟ ΑΝΕΒΑΣΜΕΝΩΝ PDF:\n{combined_pdf_text[:20000]}")
+        # 5. Διαχείριση Εικόνων
+        if image_files:
+            for img_file in image_files:
+                if img_file:
+                    try:
+                        img = Image.open(img_file)
+                        content_parts.append(img)
+                    except: pass
+            content_parts.append("Δες τις φωτογραφίες για κωδικούς, πινακίδες ή βλάβες.")
 
-        contents.append(f"ΕΡΩΤΗΣΗ ΧΡΗΣΤΗ: {user_query}")
-        
-        response = model.generate_content(contents)
+        # 6. Διαχείριση PDF που ανέβασε ο χρήστης ΤΩΡΑ στο Chat
+        if pdf_files:
+            pdf_text_combined = ""
+            for pdf in pdf_files:
+                pdf_text_combined += extract_text_from_pdf(pdf)
+            if pdf_text_combined:
+                content_parts.append(f"ΠΕΡΙΕΧΟΜΕΝΟ PDF ΧΡΗΣΤΗ:\n{pdf_text_combined[:20000]}")
+
+        # 7. Η Ερώτηση
+        content_parts.append(f"ΕΡΩΤΗΣΗ: {user_query}")
+
+        # 8. Κλήση AI
+        response = model.generate_content(content_parts)
         final_text = response.text
 
-        # Προσθήκη Πολλαπλών Links Πηγών
+        # 9. Προσθήκη Links από τη Βιβλιοθήκη (Post-Processing)
         if os.path.exists(INDEX_FILE):
             try:
                 with open(INDEX_FILE, "r", encoding="utf-8") as f:
                     db = json.load(f)
                     links = []
-                    # Εντοπισμός όλων των σχετικών αρχείων που αναφέρθηκαν ή είναι σχετικά
+                    # Ψάχνουμε αν το κείμενο της απάντησης περιέχει αναφορές σε αρχεία
                     for entry in db:
-                        if entry['brand'].lower() in final_text.lower() and entry['model'].lower() in final_text.lower():
-                            link_md = f"\n📂 **Σχετικό Έγγραφο:** [{entry['name']}](https://drive.google.com/open?id={entry['file_id']})"
+                        # Αν το όνομα του αρχείου ή ο συνδυασμός Μάρκα+Μοντέλο υπάρχει στην απάντηση
+                        is_relevant = (entry['name'] in final_text) or \
+                                      (entry['brand'].lower() in final_text.lower() and entry['model'].lower() in final_text.lower())
+                        
+                        if is_relevant:
+                            link_md = f"\n📂 **Manual:** [{entry['name']}](https://drive.google.com/open?id={entry['file_id']})"
                             if link_md not in links: links.append(link_md)
                     
                     if links:
-                        final_text += "\n\n**Πηγές από τη Βιβλιοθήκη σου:**\n" + "".join(links)
+                        # Βάζουμε μέχρι 5 links για να μην γεμίσει ο τόπος
+                        final_text += "\n\n**Σχετικά Έγγραφα:**\n" + "".join(list(set(links))[:5])
             except: pass
 
         return final_text
+
     except Exception as e:
-        return f"❌ Σφάλμα συστήματος: {str(e)}"
+        return f"❌ Σφάλμα Mastro Nek: {str(e)}\n(Δοκίμασε ξανά ή έλεγξε το API Key)"
