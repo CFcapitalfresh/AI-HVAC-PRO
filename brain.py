@@ -1,5 +1,5 @@
 # Αρχείο: brain.py
-# ΕΚΔΟΣΗ: 2.4.0 - EXPLICIT SOURCES & GENERAL KNOWLEDGE
+# ΕΚΔΟΣΗ: 2.5.0 - SELF-HEALING & EXPLICIT SOURCES
 
 import google.generativeai as genai
 import time
@@ -12,7 +12,6 @@ from PIL import Image
 # --- ΡΥΘΜΙΣΕΙΣ ---
 INDEX_FILE = "drive_index.json"
 ACTIVE_MODEL_NAME = None
-LAST_ERROR = ""
 
 SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -21,26 +20,48 @@ SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
+def get_api_key():
+    """Ασφαλής ανάκτηση κλειδιού από παντού."""
+    key = os.environ.get("GEMINI_KEY")
+    if not key:
+        try: key = st.secrets.get("GEMINI_KEY")
+        except: pass
+    return key
+
+def find_working_model():
+    """Βρίσκει το πρώτο διαθέσιμο μοντέλο για να αποφύγει το 404."""
+    try:
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Σειρά προτίμησης: Flash (γρήγορο), Pro (έξυπνο), Old Pro
+        preferences = [
+            "models/gemini-1.5-flash", 
+            "models/gemini-1.5-pro", 
+            "models/gemini-pro"
+        ]
+        
+        # Επιστρέφει το πρώτο που υπάρχει στη λίστα της Google
+        for p in preferences:
+            if p in models: return p
+            
+        return models[0] if models else "models/gemini-1.5-flash"
+    except:
+        return "models/gemini-1.5-flash" # Λύση ανάγκης
+
 def setup_ai(api_key):
-    global ACTIVE_MODEL_NAME, LAST_ERROR
-    if not api_key:
-        api_key = os.environ.get("GEMINI_KEY")
-        if not api_key:
-            try: api_key = st.secrets.get("GEMINI_KEY")
-            except: pass
-        if not api_key: return
+    global ACTIVE_MODEL_NAME
+    
+    # Χειροκίνητη ή Αυτόματη εύρεση κλειδιού
+    if not api_key: api_key = get_api_key()
+    if not api_key: return "MISSING_KEY"
 
     try:
         genai.configure(api_key=api_key)
-        try:
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        except: models = []
-        
-        preferred = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "gemini-1.5-flash"]
-        selected = next((m for m in preferred if m in models), "models/gemini-1.5-flash")
-        ACTIVE_MODEL_NAME = selected
+        # ΕΔΩ ΓΙΝΕΤΑΙ Η ΔΙΟΡΘΩΣΗ ΤΟΥ 404
+        ACTIVE_MODEL_NAME = find_working_model()
+        return "OK"
     except Exception as e:
-        LAST_ERROR = str(e)
+        return str(e)
 
 def extract_text_from_pdf(file_path, max_pages=15):
     text = ""
@@ -71,40 +92,41 @@ def load_comprehensive_context(user_query):
 
 def smart_solve(user_query, pdf_files, image_files, audio_file, history):
     global ACTIVE_MODEL_NAME
-    if not ACTIVE_MODEL_NAME:
-        key = st.secrets.get("GEMINI_KEY")
-        if key: setup_ai(key)
-        if not ACTIVE_MODEL_NAME: return "⚠️ Σφάλμα API Key."
+    
+    # Setup κάθε φορά για να είμαστε σίγουροι
+    status = setup_ai(None) 
+    if status == "MISSING_KEY": return "⚠️ Σφάλμα: Δεν βρέθηκε κλειδί API (Streamlit Secrets)."
+    if not ACTIVE_MODEL_NAME: return "⚠️ Σφάλμα Σύνδεσης AI."
 
     try:
         model = genai.GenerativeModel(model_name=ACTIVE_MODEL_NAME, safety_settings=SAFETY_SETTINGS)
         content_parts = []
 
-        # 1. Context Βιβλιοθήκης
+        # 1. Context
         library_ctx = load_comprehensive_context(user_query)
 
-        # 2. ΑΥΣΤΗΡΟ SYSTEM PROMPT ΓΙΑ ΠΗΓΕΣ
+        # 2. PROMPT
         sys_prompt = f"""
         Είσαι ο 'Mastro Nek AI', Senior HVAC Expert.
         
-        ΚΑΝΟΝΕΣ ΠΗΓΩΝ & ΓΝΩΣΗΣ:
-        1. **ΠΟΛΛΑΠΛΕΣ ΠΗΓΕΣ:** Αν υπάρχουν πολλά manuals (Service, Install, User), διάβασέ τα όλα. Συνδύασε πληροφορίες (π.χ. Υδραυλικά από Install, Βλάβες από Service).
-        2. **ΔΙΑΧΩΡΙΣΜΟΣ:** Πρέπει να είσαι ξεκάθαρος.
-           - Όταν η πληροφορία είναι από το manual, γράψε: "Σύμφωνα με το [Όνομα Manual]..."
-           - Όταν η πληροφορία είναι από τη δική σου γνώση, γράψε: "Βάσει της Γενικής Τεχνικής Εμπειρίας (General Knowledge)..."
-        3. **ΚΕΝΑ:** Αν τα manuals δεν καλύπτουν το θέμα, πες το ανοιχτά και δώσε λύση από τη Γενική Γνώση.
-        4. **ΑΣΦΑΛΕΙΑ:** Πάντα προειδοποιήσεις για ρεύμα/αέριο.
+        ΟΔΗΓΙΕΣ ΠΗΓΩΝ:
+        1. **ΔΙΑΧΩΡΙΣΜΟΣ:**
+           - Αν η πληροφορία υπάρχει στο manual, ξεκίνα με: "✅ **Σύμφωνα με το [Όνομα Manual]:**"
+           - Αν δεν υπάρχει, ξεκίνα με: "🔧 **Βάσει Γενικής Εμπειρίας (General Knowledge):**"
+           - Αν υπάρχει και στα δύο, πες το: "Το manual λέει X, αλλά η εμπειρία δείχνει και Y."
+        2. **ΠΟΛΛΑΠΛΑ MANUALS:** Αν έχεις Service, Install και User manuals, ψάξε σε όλα.
+        3. **ΑΣΦΑΛΕΙΑ:** Πάντα προειδοποιήσεις.
         
         {library_ctx}
         """
         content_parts.append(sys_prompt)
 
-        # 3. Ιστορικό
+        # 3. History
         if history:
-            h_text = "\nΙΣΤΟΡΙΚΟ:\n" + "\n".join([f"{'ΧΡΗΣΤΗΣ' if m['role']=='user' else 'AI'}: {m['content']}" for m in history[-6:]])
+            h_text = "\nΙΣΤΟΡΙΚΟ:\n" + "\n".join([f"{'User' if m['role']=='user' else 'AI'}: {m['content']}" for m in history[-6:]])
             content_parts.append(h_text)
 
-        # 4. Πολυμέσα
+        # 4. Multimedia
         if audio_file:
             try:
                 d = audio_file.getvalue() if hasattr(audio_file, 'getvalue') else audio_file.read()
@@ -126,7 +148,7 @@ def smart_solve(user_query, pdf_files, image_files, audio_file, history):
         response = model.generate_content(content_parts)
         final_text = response.text
 
-        # 5. Προσθήκη Links
+        # 5. Links
         if os.path.exists(INDEX_FILE):
             try:
                 with open(INDEX_FILE, "r", encoding="utf-8") as f:
@@ -141,4 +163,4 @@ def smart_solve(user_query, pdf_files, image_files, audio_file, history):
         return final_text
 
     except Exception as e:
-        return f"❌ Σφάλμα: {str(e)}"
+        return f"❌ Σφάλμα AI: {str(e)}"
