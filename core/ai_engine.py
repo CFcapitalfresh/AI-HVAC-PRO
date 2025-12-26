@@ -115,18 +115,35 @@ class AIEngine:
             return f"⚠️ Σφάλμα AI: {str(e)}"
 
     def extract_metadata_from_text(self, text, filename):
-        """Ειδική μέθοδος για τον Organizer."""
+        """
+        Ειδική μέθοδος για τον Organizer (Deep Analysis).
+        Επιστρέφει: CATEGORY | BRAND | MODEL | TYPE
+        """
         sys_prompt = f"""
-        Analyze this HVAC manual header.
-        Filename: {filename}
-        Text Sample: {text[:1000]}
+        ACT AS AN HVAC EXPERT LIBRARIAN.
+        Analyze the text from this document (first 15 pages or full text).
+        
+        FILENAME: {filename}
+        TEXT CONTENT:
+        {text[:25000]}  # Στέλνουμε μεγάλο μέρος κειμένου
 
-        Extract:
-        1. Category (Boilers, AirConditioners, HeatPumps, Solar, Controllers, Other)
-        2. Brand (Manufacturer Name)
-        3. Model Series
+        YOUR TASK: Classify this document into 4 levels.
+        
+        1. CATEGORY: [Boilers, AirConditioners, HeatPumps, Solar, WaterHeaters, Controllers, Underfloor, Tools, Other]
+        2. BRAND: The manufacturer (e.g. Ariston, Daikin, Mitsubishi). If unknown, use "Unknown".
+        3. MODEL: The specific model series (e.g. Clas One, Altherma 3, Alterra). If general, use "General".
+        4. TYPE: What kind of document is this? Choose strictly one:
+           - [ServiceManual] (Technical repair guide, error codes, dismantling)
+           - [UserManual] (Instructions for the end user)
+           - [InstallationManual] (For installers, dimensions, piping)
+           - [WiringDiagram] (Electrical schematics only)
+           - [SpareParts] (Exploded views, part codes)
+           - [Certificates] (CE, Declaration of conformity)
+           - [Brochure] (Marketing material)
 
-        Format: CATEGORY|BRAND|MODEL
-        Use "Unknown" if unsure.
+        OUTPUT FORMAT: CATEGORY|BRAND|MODEL|TYPE
+        EXAMPLE: Boilers|Ariston|Clas One|ServiceManual
+        
+        CRITICAL: If you cannot identify the Brand or Category with high confidence, output: MANUAL_REVIEW
         """
         return self.analyze_content(sys_prompt)
