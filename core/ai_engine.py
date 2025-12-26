@@ -1,11 +1,11 @@
 """
-CORE MODULE: AI ENGINE (BRAIN) - FINAL PLATINUM EDITION
+CORE MODULE: AI ENGINE (BRAIN) - SELF HEALING & PERSONA
 -------------------------------------------------------
 Features:
-1. Mastro Nek Persona (Strict HVAC Expert for Chat).
-2. Deep Librarian Logic (Category|Brand|Model|Type for Organizer).
-3. Language Enforcement (Greek/English).
-4. Robust Error Handling.
+1. AUTO-DISCOVERY: Finds available models automatically (Fixes 404 errors).
+2. Mastro Nek Persona: Strict HVAC Expert for Chat.
+3. Deep Librarian Logic: For the AI Organizer.
+4. Language Enforcement: Greek/English.
 """
 
 import google.generativeai as genai
@@ -21,30 +21,72 @@ class AIEngine:
         self._setup()
 
     def _setup(self):
-        """Αρχική ρύθμιση σύνδεσης με Google Gemini."""
+        """Αρχική ρύθμιση με Αυτόματη Επιλογή Μοντέλου."""
         if not self.api_key:
             logger.critical("AI Setup Failed: No API Key.")
             return
         
         try:
             genai.configure(api_key=self.api_key)
-            # Χρησιμοποιούμε το flash μοντέλο για ταχύτητα.
-            # Αν θες πιο έξυπνο (αλλά πιο αργό), βάλε 'gemini-1.5-pro'
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # --- AUTO DISCOVERY LOGIC ---
+            best_model_name = self._find_best_model()
+            logger.info(f"✅ AI selected model: {best_model_name}")
+            
+            self.model = genai.GenerativeModel(best_model_name)
+            
         except Exception as e:
             logger.critical(f"AI Setup Error: {e}")
 
+    def _find_best_model(self):
+        """
+        Ρωτάει την Google ποια μοντέλα είναι διαθέσιμα και διαλέγει το καλύτερο.
+        """
+        try:
+            # 1. Λήψη λίστας διαθέσιμων μοντέλων
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+            
+            # 2. Λίστα Προτεραιότητας (Ψάχνουμε με αυτή τη σειρά)
+            # Προτιμάμε το 1.5 Flash για ταχύτητα, μετά το Pro, μετά το απλό 1.0
+            priorities = [
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-flash-latest",
+                "models/gemini-1.5-flash-001",
+                "models/gemini-1.5-pro",
+                "models/gemini-1.5-pro-latest",
+                "models/gemini-pro"
+            ]
+
+            # 3. Έλεγχος αν υπάρχει κάποιο από τα αγαπημένα μας
+            for priority in priorities:
+                if priority in available_models:
+                    return priority
+            
+            # 4. Fallback: Αν δεν βρούμε κανένα γνωστό, παίρνουμε το πρώτο διαθέσιμο "gemini"
+            for m in available_models:
+                if "gemini" in m:
+                    return m
+            
+            # 5. Απόλυτη λύση ανάγκης
+            return "models/gemini-pro"
+            
+        except Exception as e:
+            logger.error(f"Model Discovery Failed: {e}")
+            return "models/gemini-pro" # Default safe choice
+
     def analyze_content(self, prompt, context_text="", image=None, lang="gr"):
         """
-        ΛΕΙΤΟΥΡΓΙΑ 1: CHAT
-        Εκτελεί ερώτηση με αυστηρή προσωπικότητα HVAC (Mastro Nek).
+        ΛΕΙΤΟΥΡΓΙΑ 1: CHAT (Με Προσωπικότητα)
         """
-        if not self.model: return "⚠️ AI System Offline."
+        if not self.model: return "⚠️ AI System Offline (Model not loaded)."
 
-        # 1. Επιλογή Γλώσσας
+        # Επιλογή Γλώσσας
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # 2. Η "Ταυτότητα" του Συστήματος (System Prompt)
+        # System Prompt (Ταυτότητα)
         system_persona = f"""
         INSTRUCTIONS:
         You are 'Mastro Nek', an expert HVAC Technician Assistant.
@@ -74,9 +116,7 @@ class AIEngine:
 
     def extract_metadata_from_text(self, text, filename):
         """
-        ΛΕΙΤΟΥΡΓΙΑ 2: ORGANIZER (LIBRARIAN)
-        Αναλύει το κείμενο PDF για ταξινόμηση 4 επιπέδων.
-        Επιστρέφει: CATEGORY | BRAND | MODEL | TYPE
+        ΛΕΙΤΟΥΡΓΙΑ 2: ORGANIZER (Βιβλιοθηκονόμος)
         """
         if not self.model: return "Unsorted|Unknown|Unknown|Manual"
 
