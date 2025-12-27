@@ -68,10 +68,10 @@ class AIEngine:
         CONTEXT DATA (Best Matching Manuals): {context_files}
         
         CRITICAL INSTRUCTION ON SOURCES:
-        I have provided you with the CLOSEST MATCHING MANUALS found.
-        1. **VERIFY RELEVANCE**: Check if the manual belongs to the same **Product Family** (e.g., if user asks for "Next Evo X" and you have "Next Evo", IT IS RELEVANT).
+        I have provided you with the CLOSEST MATCHING MANUALS found based on keywords.
+        1. **VERIFY RELEVANCE**: Check if the manual provided belongs to the same **Product Family** or is technically similar to the user's device (e.g., "Next Evo" manual is relevant for "Next Evo X").
         2. **USE IT**: If it is relevant, answer using the manual and cite it: "📖 **Πηγή / Source:** [Filename]".
-        3. **FALLBACK**: Only if the manual is COMPLETELY UNRELATED (e.g. Air Conditioner vs Boiler), ignore it and use General Knowledge, stating: "⚠️ **Πηγή / Source:** Γενική Γνώση / General Knowledge (Manual not found)".
+        3. **FALLBACK**: Only if the manual is COMPLETELY UNRELATED (e.g. Air Conditioner manual for a Boiler question), ignore it and use General Knowledge, stating: "⚠️ **Πηγή / Source:** Γενική Γνώση / General Knowledge (Manual not found)".
         
         OUTPUT FORMAT:
         - Diagnosis (Cause)

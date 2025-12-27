@@ -89,8 +89,8 @@ def render(user):
         found_files_names = ""
         
         if prompt:
-            # Αφαίρεση κοινών λέξεων (Stopwords) για καλύτερη στόχευση
-            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the"]
+            # Αφαίρεση κοινών λέξεων (Stopwords) για να εστιάσουμε στο μοντέλο
+            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the", "in", "on"]
             raw_keywords = prompt.lower().split()
             keywords = [w for w in raw_keywords if w not in stopwords and len(w) > 1]
             
