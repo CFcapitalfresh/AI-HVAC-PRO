@@ -1,14 +1,15 @@
 """
-SERVICE: DIAGNOSTICS LOGIC (ROBUST & DEBUG VERSION)
+SERVICE: DIAGNOSTICS LOGIC (AUTO-DISCOVERY EDITION)
 ---------------------------------------------------
 Description: Specialized AI service that generates step-by-step 
-diagnostic checklists. Includes advanced JSON parsing and error reporting.
+diagnostic checklists.
+UPDATED: Now includes SMART MODEL DISCOVERY to avoid 404 errors.
 """
 
 import google.generativeai as genai
 import json
 import logging
-import streamlit as st  # <--- Προσθήκη για να δείχνουμε τα σφάλματα στην οθόνη
+import streamlit as st
 from core.config_loader import ConfigLoader
 
 logger = logging.getLogger("Service.Diagnostics")
@@ -23,7 +24,42 @@ class DiagnosticsService:
         if self.api_key:
             try:
                 genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+                
+                # --- SMART AUTO-DISCOVERY (Η Διόρθωση) ---
+                # 1. Ρωτάμε το API τι μοντέλα είναι διαθέσιμα
+                available_models = []
+                try:
+                    for m in genai.list_models():
+                        if 'generateContent' in m.supported_generation_methods:
+                            available_models.append(m.name)
+                except: pass
+
+                # 2. Λίστα προτίμησης (από το γρηγορότερο στο πιο έξυπνο)
+                preferred_order = [
+                    "models/gemini-1.5-flash", 
+                    "models/gemini-1.5-flash-latest",
+                    "models/gemini-1.5-pro",
+                    "models/gemini-pro"
+                ]
+                
+                selected_model = None
+                
+                # 3. Επιλογή του πρώτου διαθέσιμου
+                for p in preferred_order:
+                    if p in available_models:
+                        selected_model = p
+                        break
+                
+                # Fallback: Αν δεν βρήκε κανένα από τα preferred, πάρε το πρώτο διαθέσιμο
+                if not selected_model and available_models:
+                    selected_model = available_models[0]
+
+                if selected_model:
+                    # st.toast(f"Diagnostics using: {selected_model}") # Προαιρετικό debug
+                    self.model = genai.GenerativeModel(selected_model)
+                else:
+                    st.error("❌ Δεν βρέθηκε κανένα διαθέσιμο μοντέλο Gemini.")
+                    
             except Exception as e:
                 st.error(f"⚠️ AI Configuration Error: {e}")
         else:
@@ -32,7 +68,7 @@ class DiagnosticsService:
     def generate_checklist(self, error_code, manual_text=""):
         """Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON."""
         if not self.model: 
-            st.error("❌ Το AI Model δεν έχει αρχικοποιηθεί (Model is None).")
+            st.error("❌ Το AI Model δεν έχει αρχικοποιηθεί.")
             return None
 
         prompt = f"""
@@ -76,8 +112,7 @@ class DiagnosticsService:
             
             text = response.text.strip()
             
-            # --- ΠΡΟΗΓΜΕΝΟΣ ΚΑΘΑΡΙΣΜΟΣ JSON ---
-            # Βρίσκουμε την πρώτη αγκύλη '{' και την τελευταία '}'
+            # --- ROBUST JSON PARSING ---
             start_idx = text.find('{')
             end_idx = text.rfind('}') + 1
             
@@ -85,15 +120,14 @@ class DiagnosticsService:
                 clean_json = text[start_idx:end_idx]
                 return json.loads(clean_json)
             else:
-                # Αν αποτύχει, δείχνουμε τι έστειλε το AI για να καταλάβουμε
                 st.warning(f"⚠️ Το AI επέστρεψε μη έγκυρη μορφή: {text[:100]}...")
                 return None
             
-        except json.JSONDecodeError as e:
-            st.error(f"❌ JSON Error: Δεν μπορώ να διαβάσω την απάντηση του AI. ({e})")
-            return None
         except Exception as e:
-            # Εμφάνιση του πραγματικού σφάλματος στην οθόνη
-            st.error(f"❌ System Error: {str(e)}")
+            # Ειδικός χειρισμός για το 404 (αν ξανασυμβεί)
+            if "404" in str(e):
+                st.error("❌ Σφάλμα 404: Το επιλεγμένο μοντέλο δεν βρέθηκε. Δοκίμασε να αλλάξεις API Key ή Region.")
+            else:
+                st.error(f"❌ System Error: {str(e)}")
             logger.error(f"Diagnostics Error: {e}")
             return None
