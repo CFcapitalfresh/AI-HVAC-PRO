@@ -1,0 +1,2006 @@
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\diagnose.py
+==================================================
+# Αρχείο: diagnose.py
+# Εργαλείο Ελέγχου Συστημάτων HVAC App
+# ΕΝΗΜΕΡΩΣΗ: Προστέθηκε Αυτόματος Εντοπισμός Μοντέλου (Auto-Detect)
+
+import streamlit as st
+import os
+import sys
+import time
+
+st.set_page_config(page_title="System Diagnosis", page_icon="🩺")
+
+st.title("🩺 HVAC System Diagnosis")
+st.write("Εκτέλεση διαγνωστικών ελέγχων για εντοπισμό του προβλήματος...")
+
+def status_write(msg, state="loading"):
+    if state == "loading":
+        return st.empty().info(f"⏳ {msg}...")
+    elif state == "success":
+        st.success(f"✅ {msg}")
+    elif state == "error":
+        st.error(f"❌ {msg}")
+    elif state == "warning":
+        st.warning(f"⚠️ {msg}")
+
+# --- ΛΕΙΤΟΥΡΓΙΑ: ΑΥΤΟΜΑΤΟΣ ΕΝΤΟΠΙΣΜΟΣ ΜΟΝΤΕΛΟΥ ---
+def get_best_model(api_key_val):
+    """Βρίσκει ποιο μοντέλο λειτουργεί αυτή τη στιγμή"""
+    import google.generativeai as genai
+    genai.configure(api_key=api_key_val)
+    
+    try:
+        # Ρωτάμε την Google τι έχει διαθέσιμο
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Λίστα προτίμησης (από το καλύτερο προς το χειρότερο)
+        # Ψάχνουμε και με "models/" και χωρίς, για σιγουριά
+        preferred = [
+            "gemini-2.0-flash-exp", 
+            "models/gemini-2.0-flash-exp",
+            "gemini-1.5-pro", 
+            "models/gemini-1.5-pro",
+            "gemini-1.5-flash", 
+            "models/gemini-1.5-flash",
+            "gemini-pro",
+            "models/gemini-pro"
+        ]
+        
+        # 1. Ψάχνουμε τα αγαπημένα μας στη λίστα διαθέσιμων
+        for p in preferred:
+            if p in available_models:
+                return p
+        
+        # 2. Αν δεν βρούμε συγκεκριμένο, παίρνουμε το πρώτο που έχει τη λέξη "gemini"
+        for m in available_models:
+            if "gemini" in m:
+                return m
+                
+        return "models/gemini-1.5-flash" # Τελευταία ελπίδα
+    except Exception as e:
+        return "models/gemini-1.5-flash"
+
+# --- CHECK 1: ENVIRONMENT & LIBRARIES ---
+st.subheader("1. Έλεγχος Βιβλιοθηκών")
+try:
+    import google.generativeai as genai
+    import pypdf
+    from google.oauth2 import service_account
+    status_write("Όλες οι βιβλιοθήκες (google-genai, pypdf) βρέθηκαν", "success")
+except ImportError as e:
+    status_write(f"Λείπει βιβλιοθήκη: {e}", "error")
+    st.stop()
+
+# --- CHECK 2: SECRETS FILE ---
+st.subheader("2. Έλεγχος Κλειδιών (Secrets)")
+api_key = None
+try:
+    if "GEMINI_KEY" in st.secrets:
+        api_key = st.secrets["GEMINI_KEY"]
+        mask = api_key[:5] + "..." + api_key[-4:]
+        status_write(f"Το API Key βρέθηκε ({mask})", "success")
+    else:
+        status_write("Δεν βρέθηκε το GEMINI_KEY στο secrets.toml", "error")
+        st.info("Φτιάξε φάκελο .streamlit/secrets.toml και βάλε μέσα: GEMINI_KEY = 'YOUR_KEY'")
+except FileNotFoundError:
+    status_write("Δεν βρέθηκε φάκελος .streamlit ή αρχείο secrets.toml", "error")
+except Exception as e:
+    status_write(f"Σφάλμα ανάγνωσης secrets: {e}", "error")
+
+# --- CHECK 3: GOOGLE AI CONNECTION (PING) ---
+st.subheader("3. Σύνδεση με AI (Ping Test)")
+if api_key:
+    msg_box = status_write("Προσπάθεια σύνδεσης με Google Servers")
+    try:
+        genai.configure(api_key=api_key)
+        # Προσπάθεια εύρεσης μοντέλων
+        models = list(genai.list_models())
+        count = len(models)
+        status_write(f"Επιτυχία! Συνδέθηκε και βρήκε {count} διαθέσιμα μοντέλα.", "success")
+            
+    except Exception as e:
+        status_write(f"Αποτυχία Σύνδεσης: {str(e)}", "error")
+        st.error("Αυτό σημαίνει ότι το Κλειδί είναι λάθος ή μπλοκαρισμένο, ή δεν υπάρχει ίντερνετ.")
+
+# --- CHECK 4: SIMULATION (GENERATION) ---
+st.subheader("4. Προσομοίωση Απάντησης (Test Run)")
+if api_key:
+    # ΕΔΩ ΕΙΝΑΙ Η ΜΕΓΑΛΗ ΑΛΛΑΓΗ - ΑΥΤΟΜΑΤΗ ΕΠΙΛΟΓΗ
+    active_model_name = get_best_model(api_key)
+    st.info(f"ℹ️ Το σύστημα επέλεξε αυτόματα το μοντέλο: **{active_model_name}**")
+    
+    msg_box = status_write(f"Στέλνω δοκιμαστική ερώτηση στο {active_model_name}...")
+    try:
+        model = genai.GenerativeModel(active_model_name)
+        # Στέλνουμε κάτι πολύ απλό
+        response = model.generate_content("Γράψε τη λέξη 'OK'.")
+        
+        if response.text:
+            status_write(f"Το AI απάντησε: '{response.text.strip()}'", "success")
+        else:
+            status_write("Το AI απάντησε αλλά το κείμενο ήταν κενό.", "warning")
+            
+    except Exception as e:
+        status_write(f"CRITICAL ERROR: {str(e)}", "error")
+        if "429" in str(e):
+            st.error("👉 ΕΠΙΒΕΒΑΙΩΣΗ: Το πρόβλημα είναι το QUOTA (429). Το κλειδί έχει ξεπεράσει τα όρια.")
+        elif "403" in str(e) or "API_KEY_INVALID" in str(e):
+            st.error("👉 ΕΠΙΒΕΒΑΙΩΣΗ: Το κλειδί δεν είναι έγκυρο.")
+        elif "404" in str(e):
+             st.error("👉 ΕΠΙΒΕΒΑΙΩΣΗ: Το μοντέλο δεν βρέθηκε. Δοκίμασε να κάνεις update: pip install --upgrade google-generativeai")
+        else:
+             st.error("👉 Άγνωστο σφάλμα δικτύου/συστήματος.")
+
+# --- CHECK 5: PDF ENGINE ---
+st.subheader("5. Μηχανή PDF")
+try:
+    # Δημιουργία ενός dummy PDF στη μνήμη για έλεγχο
+    from io import BytesIO
+    from pypdf import PdfWriter, PdfReader
+    
+    buffer = BytesIO()
+    w = PdfWriter()
+    w.add_blank_page(width=100, height=100)
+    w.write(buffer)
+    buffer.seek(0)
+    
+    r = PdfReader(buffer)
+    if len(r.pages) > 0:
+        status_write("Η βιβλιοθήκη PDF λειτουργεί σωστά.", "success")
+    else:
+        status_write("Πρόβλημα στη βιβλιοθήκη PDF.", "error")
+except Exception as e:
+    status_write(f"Σφάλμα PDF: {e}", "error")
+
+st.divider()
+st.write("Η διάγνωση ολοκληρώθηκε.")
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\main.py
+==================================================
+import streamlit as st
+from core.auth_manager import AuthManager
+from core.language_pack import get_text
+# ΠΡΟΣΘΗΚΗ: ui_search για τη Βιβλιοθήκη
+from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search
+
+st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
+
+def init_session():
+    if 'user_info' not in st.session_state: st.session_state.user_info = None
+    if 'lang' not in st.session_state: st.session_state.lang = 'gr'
+
+def handle_logout():
+    st.session_state.user_info = None
+    st.session_state.messages = [] 
+    st.rerun()
+
+def main():
+    init_session()
+    lang = st.session_state.lang
+
+    # --- LOGIN SCREEN ---
+    if not st.session_state.user_info:
+        st.header(f"🔐 {get_text('app_title', lang)}")
+        
+        c_lang, _ = st.columns([1,5])
+        with c_lang:
+            sel = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1)
+            st.session_state.lang = 'gr' if sel == "Ελληνικά" else 'en'
+            if st.session_state.lang != lang: st.rerun()
+
+        t1, t2 = st.tabs([get_text('login_tab', lang), get_text('register_tab', lang)])
+        
+        with t1:
+            with st.form("login"):
+                email = st.text_input(get_text('email_lbl', lang))
+                pwd = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_login', lang), use_container_width=True):
+                    user, msg = AuthManager.verify_login(email, pwd)
+                    if user:
+                        st.session_state.user_info = user
+                        st.rerun()
+                    else: st.error(msg)
+        with t2:
+            with st.form("reg"):
+                ne = st.text_input(get_text('email_lbl', lang))
+                nn = st.text_input(get_text('name_lbl', lang))
+                np = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_register', lang), use_container_width=True):
+                    if AuthManager.register_new_user(ne, nn, np): st.success(get_text('reg_success', lang))
+                    else: st.error("Error")
+        return 
+
+    # --- MAIN APP ---
+    user = st.session_state.user_info
+    role = user.get('role', 'active')
+
+    # SIDEBAR
+    with st.sidebar:
+        st.write(f"👤 **{user['name']}**")
+        st.caption(f"Role: {role.upper()}")
+        st.divider()
+        
+        l_sel = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
+        new_lang = 'gr' if l_sel == "Ελληνικά" else 'en'
+        if new_lang != lang:
+            st.session_state.lang = new_lang
+            st.rerun()
+
+        st.divider()
+        
+        # Menu (Πλήρες)
+        opts = {
+            get_text('menu_dashboard', new_lang): "dash",
+            get_text('menu_chat', new_lang): "chat",
+            get_text('menu_library', new_lang): "lib", # <--- Η Βιβλιοθήκη!
+            get_text('menu_clients', new_lang): "clients",
+            get_text('menu_organizer', new_lang): "org",
+            get_text('menu_tools', new_lang): "tools"
+        }
+        if role == 'admin':
+            opts[get_text('menu_admin', new_lang)] = "admin"
+
+        # Auto-Routing από Dashboard
+        default_idx = 0
+        if 'app_mode' in st.session_state:
+            try:
+                target = st.session_state.app_mode
+                if target == 'library': target = 'lib'
+                vals = list(opts.values())
+                if target in vals:
+                    default_idx = vals.index(target)
+            except: pass
+            del st.session_state.app_mode
+
+        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()), index=default_idx)
+        selection_code = opts[selection_label]
+        
+        st.divider()
+        
+        if selection_code == "chat":
+            if st.button(f"➕ {get_text('new_chat_side', new_lang)}", type="primary", use_container_width=True):
+                st.session_state.messages = []
+                st.rerun()
+        
+        if st.button(get_text('logout', new_lang)):
+            handle_logout()
+
+    # ROUTING
+    if selection_code == "dash": ui_dashboard.render(user)
+    elif selection_code == "chat": ui_chat.render(user)
+    elif selection_code == "lib": ui_search.render(user) # <--- Σύνδεση
+    elif selection_code == "clients": ui_clients.render(user)
+    elif selection_code == "org": ui_organizer.render(user)
+    elif selection_code == "tools": ui_tools.render(user)
+    elif selection_code == "admin": ui_admin_panel.render(user)
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\requirements.txt
+==================================================
+streamlit>=1.40.0
+pandas
+google-generativeai>=0.8.0
+google-auth
+google-auth-oauthlib
+google-api-python-client
+st-gsheets-connection
+pypdf
+Pillow
+bcrypt
+openpyxl
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\version.py
+==================================================
+VERSION = "1.0.0"
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\app_modules\admin_dashboard.py
+==================================================
+"""
+MODULE: Admin Dashboard
+VERSION: 3.0.0 (TITANIUM)
+DESCRIPTION: Κέντρο ελέγχου διαχειριστή. Περιλαμβάνει Logs, Users, Sync και Updates.
+"""
+
+import streamlit as st
+import subprocess
+import time
+import logging
+from typing import Any
+
+logger = logging.getLogger("Module_Admin")
+
+def _run_git_pull() -> str:
+    """Εκτελεί git pull για updates."""
+    try:
+        result = subprocess.run(["git", "pull"], capture_output=True, text=True)
+        return result.stdout
+    except Exception as e:
+        return f"Error: {e}"
+
+def render_admin_panel(data_manager: Any, smart_lib_module: Any, drive_module: Any) -> None:
+    """
+    Κύρια συνάρτηση Admin Panel.
+    Args:
+        data_manager: Το DataManager class από το main.py
+        smart_lib_module: Το module smart_library.py
+        drive_module: Το module drive.py
+    """
+    st.title("⚙️ Admin Control Center")
+    st.markdown("---")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 System Logs", "👥 User Management", "☁️ Library Sync", "🔄 Maintenance"])
+
+    # --- TAB 1: LOGS ---
+    with tab1:
+        st.subheader("Audit Logs (Security & Usage)")
+        try:
+            df_logs = data_manager.fetch_sheet_data("Logs")
+            if not df_logs.empty:
+                st.dataframe(df_logs.sort_values(by="timestamp", ascending=False if 'timestamp' in df_logs.columns else True), use_container_width=True)
+            else:
+                st.info("No logs found.")
+        except Exception as e:
+            st.error(f"Failed to load logs: {e}")
+
+    # --- TAB 2: USERS ---
+    with tab2:
+        st.subheader("Registered Users")
+        try:
+            df_users = data_manager.fetch_sheet_data("Users")
+            st.dataframe(df_users, use_container_width=True)
+        except Exception as e:
+            st.error(f"Failed to load users: {e}")
+
+    # --- TAB 3: SYNC ---
+    with tab3:
+        st.subheader("Google Drive Synchronization")
+        st.write("Χρησιμοποιήστε αυτό το εργαλείο αν η βιβλιοθήκη φαίνεται άδεια ή αν προσθέσατε νέα manuals.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info(f"Τρέχοντα Αρχεία στη Μνήμη: **{len(st.session_state.get('library_cache', []))}**")
+        
+        with col2:
+            if st.button("🚀 FORCE FULL SYNC", type="primary"):
+                if not (smart_lib_module and drive_module):
+                    st.error("Missing Modules (smart_library or drive). Cannot sync.")
+                else:
+                    try:
+                        # 1. Load Config (Folder ID)
+                        folder_id = drive_module.load_config()
+                        if not folder_id:
+                            st.error("Drive Config missing (Folder ID).")
+                        else:
+                            with st.spinner("⏳ Scanning Google Drive (This may take time)..."):
+                                count = smart_lib_module.run_full_maintenance(folder_id)
+                                st.success(f"Sync Complete! Indexed {count} files.")
+                                time.sleep(2)
+                                st.rerun()
+                    except Exception as e:
+                        st.error(f"Sync Failed: {e}")
+                        logger.error(f"Manual Sync Error: {e}")
+
+    # --- TAB 4: UPDATES ---
+    with tab4:
+        st.subheader("Software Updates")
+        if st.button("Check GitHub for Updates"):
+            with st.spinner("Pulling from repository..."):
+                output = _run_git_pull()
+                st.code(output)
+                if "Already up to date" not in output:
+                    st.warning("⚠️ New code pulled. Please restart the app.")
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\app_modules\__init__.py
+==================================================
+
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\app_modules\chat_interface.py
+==================================================
+"""
+MODULE: Chat Interface System
+VERSION: 2.0.0 (TITANIUM)
+DESCRIPTION: Διαχειρίζεται το UI της συνομιλίας, τα Uploads και την αλληλεπίδραση με το AI.
+"""
+
+import streamlit as st
+import logging
+from typing import List, Dict, Any, Optional
+
+# Ρύθμιση Logger για το Module
+logger = logging.getLogger("Module_Chat")
+
+def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) -> None:
+    """
+    Εμφανίζει το περιβάλλον συνομιλίας και διαχειρίζεται τη ροή μηνυμάτων.
+    
+    Args:
+        brain_module: Το φορτωμένο module brain.py
+        auth_module: Το φορτωμένο module auth.py (για logs)
+        user_email: Το email του χρήστη για καταγραφή
+    """
+    st.header("⚡ Mastro Nek AI Assistant")
+    
+    # 1. Εμφάνιση Ιστορικού Μηνυμάτων
+    # Χρησιμοποιούμε αμυντικό προγραμματισμό για να μην σκάσει αν η λίστα είναι None
+    messages = st.session_state.get("messages", [])
+    
+    if not messages:
+        st.info("👋 Γεια σου! Είμαι ο Mastro Nek AI. Ρώτησέ με για βλάβες, manuals ή ανταλλακτικά.")
+    
+    for msg in messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # 2. Περιοχή Εισαγωγής (Input Area)
+    # Το CSS στο main.py θα φροντίσει να είναι 'Sticky' στο κάτω μέρος
+    user_prompt = st.chat_input("Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...")
+
+    # 3. Sidebar Uploads (Mobile First Approach)
+    # Τα uploads μπαίνουν στο sidebar για να μην πιάνουν χώρο στο chat
+    with st.sidebar.expander("📎 Επισύναψη Αρχείων", expanded=False):
+        uploaded_pdfs = st.file_uploader("Ανεβάστε PDF (Manuals)", type=["pdf"], accept_multiple_files=True, key="chat_pdf_uploader")
+        uploaded_imgs = st.file_uploader("Ανεβάστε Φωτογραφίες", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="chat_img_uploader")
+        
+        if uploaded_pdfs or uploaded_imgs:
+            st.success(f"Έτοιμα για αποστολή: {len(uploaded_pdfs or []) + len(uploaded_imgs or [])} αρχεία")
+
+    # 4. Λογική Επεξεργασίας Μηνύματος
+    if user_prompt:
+        # A. Εμφάνιση μηνύματος χρήστη
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
+        with st.chat_message("user"):
+            st.markdown(user_prompt)
+            if uploaded_pdfs:
+                st.markdown(f"*📎 Επισυνάφθηκαν {len(uploaded_pdfs)} PDF αρχεία*")
+            if uploaded_imgs:
+                st.markdown(f"*📸 Επισυνάφθηκαν {len(uploaded_imgs)} Εικόνες*")
+
+        # B. Επεξεργασία από το AI
+        with st.chat_message("assistant"):
+            response_placeholder = st.empty()
+            full_response = ""
+            
+            try:
+                with st.spinner("🔄 Ανάλυση δεδομένων και εγχειριδίων..."):
+                    if brain_module:
+                        # Κλήση της συνάρτησης smart_solve του brain.py
+                        # Περνάμε το ιστορικό για context
+                        full_response = brain_module.smart_solve(
+                            user_query=user_prompt,
+                            uploaded_pdfs=uploaded_pdfs if uploaded_pdfs else [],
+                            uploaded_imgs=uploaded_imgs if uploaded_imgs else [],
+                            history=st.session_state.messages[:-1]
+                        )
+                    else:
+                        full_response = "❌ **System Error:** Το Brain Module δεν είναι διαθέσιμο."
+                        logger.critical("Brain module is missing during chat execution.")
+
+                # C. Εμφάνιση απάντησης
+                response_placeholder.markdown(full_response)
+                
+                # D. Αποθήκευση στο Session State
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+
+                # E. Καταγραφή στο Audit Log (αν υπάρχει το auth module)
+                if auth_module:
+                    auth_module.log_interaction(user_email, "Chat Query", user_prompt[:100])
+
+            except Exception as e:
+                error_msg = f"⚠️ **AI Execution Error:** {str(e)}"
+                response_placeholder.error(error_msg)
+                logger.error(f"Chat Error: {e}")
+                st.session_state.messages.append({"role": "assistant", "content": error_msg})
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\app_modules\search_engine.py
+==================================================
+"""
+MODULE: Search Engine System
+VERSION: 2.1.0 (TITANIUM)
+DESCRIPTION: Μηχανή αναζήτησης στα Manuals της μνήμης (Session State).
+"""
+
+import streamlit as st
+import logging
+from typing import List, Dict, Any
+
+logger = logging.getLogger("Module_Search")
+
+def _get_badge_color(meta_type: str) -> str:
+    """Helper Function: Επιστρέφει χρώμα ανάλογα με τον τύπο εγγράφου."""
+    if not meta_type: return "gray"
+    meta = meta_type.upper()
+    if "ERROR" in meta: return "red"
+    if "SERVICE" in meta: return "orange"
+    if "USER" in meta: return "green"
+    if "INSTALL" in meta: return "blue"
+    return "gray"
+
+def render_search_page(library_data: List[Dict[str, Any]]) -> None:
+    """
+    Εμφανίζει τη σελίδα αναζήτησης.
+    Args:
+        library_data: Η λίστα με τα manuals από το st.session_state['library_cache']
+    """
+    st.header("🔍 Global Library Search")
+    st.caption("Enterprise Indexing System | Google Drive Integration")
+
+    # 1. Έλεγχος Δεδομένων
+    if not library_data:
+        st.warning("⚠️ Η βιβλιοθήκη είναι κενή.")
+        st.info("Το σύστημα προσπαθεί να συγχρονίσει... Αν επιμένει, ειδοποιήστε τον Admin.")
+        return
+
+    # 2. Στατιστικά (Collapsible)
+    with st.expander(f"📊 Στατιστικά Ευρετηρίου ({len(library_data)} έγγραφα)", expanded=False):
+        unique_brands = sorted(list(set(item.get('brand', 'Unknown') for item in library_data)))
+        st.write(f"**Μάρκες:** {', '.join(unique_brands[:10])}...")
+
+    # 3. Μπάρα Αναζήτησης
+    query = st.text_input("🔎 Αναζήτηση (Μάρκα, Μοντέλο, Κωδικός Error)...", 
+                         placeholder="π.χ. Daikin Altherma J3 Error").strip().lower()
+
+    # 4. Λογική Αναζήτησης (AND Logic)
+    results = []
+    if query:
+        search_terms = query.split()
+        for item in library_data:
+            # Δημιουργία ενός "Searchable String" από όλα τα πεδία
+            full_text = f"{item.get('brand', '')} {item.get('model', '')} {item.get('name', '')} {item.get('error_codes', '')}".lower()
+            
+            # Έλεγχος: Όλοι οι όροι πρέπει να υπάρχουν
+            if all(term in full_text for term in search_terms):
+                results.append(item)
+        
+        logger.info(f"User searched for '{query}' - Found {len(results)} matches.")
+    else:
+        # Αν δεν γράψει τίποτα, δείχνουμε τα πρόσφατα
+        results = library_data[:5]
+        st.caption("Πρόσφατα καταχωρημένα αρχεία:")
+
+    # 5. Εμφάνιση Αποτελεσμάτων
+    if not results and query:
+        st.error("Δεν βρέθηκαν αποτελέσματα.")
+    else:
+        for res in results:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([1, 3, 1])
+                
+                # Στήλη 1: Brand & Badge
+                with c1:
+                    st.markdown(f"**{res.get('brand', 'Unknown')}**")
+                    color = _get_badge_color(res.get('meta_type', 'MANUAL'))
+                    st.markdown(f":{color}[{res.get('meta_type', 'DOC')}]")
+
+                # Στήλη 2: Λεπτομέρειες
+                with c2:
+                    st.markdown(f"📄 **{res.get('model', 'General Model')}**")
+                    st.caption(f"Filename: {res.get('name')}")
+                
+                # Στήλη 3: Κουμπί
+                with c3:
+                    link = res.get('link')
+                    # Fallback link generation
+                    if not link and res.get('file_id') and res.get('file_id') != 'Unknown':
+                        link = f"https://drive.google.com/file/d/{res['file_id']}/view"
+                    
+                    if link:
+                        st.link_button("📂 Άνοιγμα", link, use_container_width=True)
+                    else:
+                        st.caption("No Link Available")
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\app_modules\tools_suite.py
+==================================================
+"""
+MODULE: Tools Suite & Clients
+VERSION: 1.5.0 (TITANIUM)
+DESCRIPTION: Περιέχει τα υπολογιστικά εργαλεία και την προβολή πελατολογίου.
+"""
+
+import streamlit as st
+import pandas as pd
+from typing import Any
+
+def render_tools_page() -> None:
+    """Εμφανίζει τα εργαλεία υπολογισμού."""
+    st.title("🧮 HVAC Tools Suite")
+    
+    t1, t2 = st.tabs(["❄️ BTU Calculator", "📏 Unit Converter"])
+    
+    with t1:
+        st.subheader("Υπολογισμός Ψυκτικών Φορτίων (BTU)")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            area = st.number_input("Εμβαδόν Χώρου (m²)", min_value=1.0, value=20.0, step=1.0)
+            height = st.number_input("Ύψος (m)", min_value=2.0, value=3.0, step=0.1)
+        with c2:
+            insulation = st.selectbox("Μόνωση", ["Καλή", "Μέτρια", "Κακή"])
+            sun = st.selectbox("Έκθεση στον Ήλιο", ["Χαμηλή", "Μέτρια", "Υψηλή"])
+            
+        # Logic
+        factor = 500 # Base
+        if insulation == "Καλή": factor -= 50
+        if insulation == "Κακή": factor += 100
+        if sun == "Υψηλή": factor += 80
+        
+        # Volume Correction
+        vol_correction = 1.0
+        if height > 3.0: vol_correction = height / 3.0
+        
+        result = area * factor * vol_correction
+        
+        st.divider()
+        st.success(f"📌 Απαιτούμενη Ισχύς: **{int(result):,} BTU/h**")
+        st.info("ℹ️ *Ο υπολογισμός είναι εμπειρικός.*")
+
+    with t2:
+        st.write("🔧 Converter coming soon...")
+
+def render_clients_viewer(data_manager: Any) -> None:
+    """
+    Εμφανίζει το πελατολόγιο από τα Google Sheets.
+    Args:
+        data_manager: Μια κλάση/μέθοδος από το main.py που φέρνει δεδομένα.
+    """
+    st.title("📇 Πελατολόγιο")
+    
+    # Φόρτωση δεδομένων
+    with st.spinner("Φόρτωση Πελατών..."):
+        # Υποθέτουμε ότι το DataManager έχει μέθοδο fetch_sheet_data
+        try:
+            df = data_manager.fetch_sheet_data("Clients")
+        except Exception as e:
+            st.error(f"Error fetching clients: {e}")
+            return
+
+    if df.empty:
+        st.warning("Η λίστα πελατών είναι κενή.")
+        return
+
+    # Αναζήτηση
+    search = st.text_input("🔍 Αναζήτηση Πελάτη", placeholder="Όνομα, Τηλέφωνο ή Διεύθυνση...")
+    
+    if search:
+        mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False, na=False)).any(axis=1)
+        df = df[mask]
+        st.success(f"Βρέθηκαν {len(df)} εγγραφές.")
+        
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\language_pack.py
+==================================================
+"""
+CORE MODULE: LANGUAGE PACK
+--------------------------
+Central dictionary for all UI text strings.
+Supports: Greek ('gr'), English ('en')
+"""
+
+TRANS = {
+    # --- GENERAL UI ---
+    'app_title': {'gr': "Mastro Nek AI | Platinum", 'en': "Mastro Nek AI | Platinum"},
+    'menu_header': {'gr': "Πλοήγηση", 'en': "Navigation"},
+    'menu_dashboard': {'gr': "📊 Επισκόπηση", 'en': "📊 Dashboard"},
+    'menu_chat': {'gr': "💬 AI Συνομιλία", 'en': "💬 AI Chat"},
+    'menu_library': {'gr': "🔎 Βιβλιοθήκη Manuals", 'en': "🔎 Manuals Library"},
+    'menu_organizer': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
+    'menu_clients': {'gr': "📇 Πελατολόγιο", 'en': "📇 Client CRM"},
+    'menu_tools': {'gr': "🛠️ Εργαλεία", 'en': "🛠️ Tools"},
+    'menu_admin': {'gr': "⚙️ Διαχείριση", 'en': "⚙️ Admin Panel"},
+    'logout': {'gr': "🚪 Αποσύνδεση", 'en': "🚪 Logout"},
+    'new_chat_side': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
+
+    # --- DASHBOARD ---
+    'dash_welcome': {'gr': "👋 Καλωσήρθες", 'en': "👋 Welcome"},
+    'dash_subtitle': {'gr': "Κέντρο Ελέγχου Τεχνικής Υποστήριξης", 'en': "Technical Support Control Center"},
+    'dash_quick': {'gr': "🚀 Γρήγορες Ενέργειες", 'en': "🚀 Quick Actions"},
+    'dash_chat_card': {'gr': "AI Τεχνικός Βοηθός", 'en': "AI Technical Assistant"},
+    'dash_chat_desc': {'gr': "Διάγνωση βλαβών & Λύσεις", 'en': "Diagnosis & Solutions"},
+    'dash_btn_chat': {'gr': "💬 Έναρξη Συνομιλίας", 'en': "💬 Start Chat"},
+    'dash_lib_card': {'gr': "Βιβλιοθήκη Manuals", 'en': "Manuals Library"},
+    'dash_lib_desc': {'gr': "Αναζήτηση Εγχειριδίων", 'en': "Search Manuals"},
+    'dash_btn_lib': {'gr': "🔎 Αναζήτηση", 'en': "🔎 Search"},
+    'dash_tool_card': {'gr': "Εργαλεία HVAC", 'en': "HVAC Tools"},
+    'dash_tool_desc': {'gr': "BTU Calc & Μετατροπές", 'en': "BTU Calc & Converters"},
+    'dash_btn_tool': {'gr': "🛠️ Άνοιγμα Εργαλείων", 'en': "🛠️ Open Tools"},
+    'dash_status': {'gr': "Κατάσταση Συστήματος: 🟢 Online | AI Engine: Ready", 'en': "System Status: 🟢 Online | AI Engine: Ready"},
+
+    # --- ADMIN PANEL ---
+    'admin_title': {'gr': "⚙️ Κέντρο Διαχείρισης (Admin Panel)", 'en': "⚙️ Admin Control Center"},
+    'admin_pending': {'gr': "🔔 Εκκρεμή Αιτήματα", 'en': "🔔 Pending Requests"},
+    'admin_no_pending': {'gr': "✅ Όλα ήσυχα! Κανένα νέο αίτημα.", 'en': "✅ All clear! No new requests."},
+    'admin_btn_activate': {'gr': "✅ Ενεργοποίηση", 'en': "✅ Activate"},
+    'admin_btn_delete': {'gr': "🗑️ Διαγραφή", 'en': "🗑️ Delete"},
+    'admin_msg_active': {'gr': "Ο χρήστης ενεργοποιήθηκε!", 'en': "User activated!"},
+    'admin_msg_del': {'gr': "Το αίτημα διαγράφηκε.", 'en': "Request deleted."},
+    'admin_all_users': {'gr': "👥 Προβολή Όλων των Χρηστών", 'en': "👥 View All Users"},
+    'admin_all_users_cap': {'gr': "Εδώ βλέπετε όλους τους εγγεγραμμένους χρήστες.", 'en': "List of all registered users."},
+    'admin_no_users': {'gr': "Δεν βρέθηκαν χρήστες.", 'en': "No users found."},
+
+    # --- CHAT & MEDIA ---
+    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα...", 'en': "Describe the issue..."},
+    'chat_thinking': {'gr': "🤔 Ο Mastro Nek αναλύει...", 'en': "🤔 Mastro Nek is thinking..."},
+    'chat_intro': {'gr': "👋 Γεια σου! Ρώτησέ με για βλάβες ή manuals.", 'en': "👋 Hello! Ask me about faults or manuals."},
+    'media_expander': {'gr': "📸 Κάμερα & 🎙️ Φωνητική Εντολή", 'en': "📸 Camera & 🎙️ Voice Input"},
+    'camera_label': {'gr': "📸 Τράβηξε Φωτογραφία", 'en': "📸 Take Photo"},
+    'audio_label': {'gr': "🎙️ Ηχογράφηση / Αρχείο Ήχου", 'en': "🎙️ Voice Message / Audio File"},
+    'media_sent': {'gr': "✅ Τα αρχεία επισυνάφθηκαν!", 'en': "✅ Files attached!"},
+
+    # --- TOOLS (BTU) ---
+    'tool_btu_tab': {'gr': "❄️ BTU Calculator", 'en': "❄️ BTU Calculator"},
+    'tool_conv_tab': {'gr': "📏 Μετατροπέας", 'en': "📏 Converter"},
+    'tool_pipe_tab': {'gr': "🔥 Σωληνώσεις", 'en': "🔥 Piping Guide"},
+    'tool_area': {'gr': "Τετραγωνικά (m²)", 'en': "Area (m²)"},
+    'tool_height': {'gr': "Ύψος Χώρου (m)", 'en': "Ceiling Height (m)"},
+    'tool_insulation': {'gr': "Μόνωση", 'en': "Insulation"},
+    'tool_sun': {'gr': "Προσανατολισμός", 'en': "Sun Exposure"},
+    'tool_calc_res': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Capacity"},
+    'tool_rec': {'gr': "Προτεινόμενο", 'en': "Recommended"},
+    'ins_good': {'gr': "Καλή (Νέα Κουφώματα)", 'en': "Good (New Frames)"},
+    'ins_avg': {'gr': "Μέτρια (Διπλά Τζάμια 10ετ.)", 'en': "Average (Double Glazed)"},
+    'ins_bad': {'gr': "Κακή (Μονά/Αμόνωτο)", 'en': "Poor (Single Glazed)"},
+    'sun_low': {'gr': "Σκιερό / Βόρειο", 'en': "Shady / North"},
+    'sun_med': {'gr': "Μέτρια Ηλιοφάνεια", 'en': "Medium Sun"},
+    'sun_high': {'gr': "Πολύ Ήλιος / Ρετιρέ", 'en': "High Sun / Roof"},
+    'pipe_liquid': {'gr': "Υγρού (Liquid)", 'en': "Liquid Line"},
+    'pipe_gas': {'gr': "Αερίου (Gas)", 'en': "Gas Line"},
+
+    # --- ORGANIZER ---
+    'org_title': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
+    'org_desc': {'gr': "🤖 **AI Auto-Sorter**<br>Σαρώνει και ταξινομεί αρχεία.", 'en': "🤖 **AI Auto-Sorter**<br>Scans and sorts files automatically."},
+    'org_start': {'gr': "Έναρξη Ταξινόμησης", 'en': "Start Sorting"},
+    'org_log': {'gr': "📜 Καταγραφή (Live Log)", 'en': "📜 Live Log"},
+
+    # --- CLIENTS ---
+    'client_search': {'gr': "🔍 Αναζήτηση Πελάτη...", 'en': "🔍 Search Client..."},
+    'client_found': {'gr': "Βρέθηκαν", 'en': "Found"},
+    'client_empty': {'gr': "Η λίστα είναι κενή.", 'en': "Client list is empty."},
+    
+    # --- LOGIN ---
+    'login_tab': {'gr': "Είσοδος", 'en': "Login"},
+    'register_tab': {'gr': "Εγγραφή", 'en': "Register"},
+    'email_lbl': {'gr': "Email", 'en': "Email"},
+    'pass_lbl': {'gr': "Κωδικός", 'en': "Password"},
+    'name_lbl': {'gr': "Όνομα", 'en': "Name"},
+    'btn_login': {'gr': "Είσοδος", 'en': "Login"},
+    'btn_register': {'gr': "Εγγραφή", 'en': "Register"},
+    'login_success': {'gr': "Επιτυχής Είσοδος!", 'en': "Login Successful!"},
+    'reg_success': {'gr': "Η εγγραφή ολοκληρώθηκε!", 'en': "Registration complete!"}
+}
+
+def get_text(key: str, lang: str = 'gr') -> str:
+    return TRANS.get(key, {}).get(lang, f"[{key}]")
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\__init__.py
+==================================================
+"""
+MASTRO NEK AI - CORE PACKAGE
+----------------------------
+This package contains the business logic, security, and database connectivity.
+"""
+# Το αφήνουμε κενό ή με αυτό το σχόλιο.
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\db_connector.py
+==================================================
+import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+
+class DatabaseConnector:
+    @staticmethod
+    def _get_conn():
+        return st.connection("gsheets", type=GSheetsConnection)
+
+    @staticmethod
+    def fetch_data(sheet_name, ttl=0):
+        try:
+            conn = DatabaseConnector._get_conn()
+            df = conn.read(worksheet=sheet_name, ttl=ttl)
+            return df.dropna(how="all")
+        except:
+            return pd.DataFrame()
+
+    @staticmethod
+    def append_data(sheet_name, row_data):
+        """Προσθέτει νέα γραμμή στο Excel"""
+        try:
+            conn = DatabaseConnector._get_conn()
+            existing_df = conn.read(worksheet=sheet_name, ttl=0).dropna(how="all")
+            
+            # Δημιουργία νέας γραμμής
+            new_row = pd.DataFrame([row_data], columns=existing_df.columns)
+            updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+            
+            conn.update(worksheet=sheet_name, data=updated_df)
+            return True
+        except Exception as e:
+            st.error(f"Save Error: {e}")
+            return False
+
+    @staticmethod
+    def update_all_data(sheet_name, dataframe):
+        """Ενημερώνει όλο το φύλλο (για edits/delete από το Admin Panel)"""
+        try:
+            conn = DatabaseConnector._get_conn()
+            conn.update(worksheet=sheet_name, data=dataframe)
+            return True
+        except Exception as e:
+            st.error(f"Update Error: {e}")
+            return False
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\auth_manager.py
+==================================================
+import streamlit as st
+import bcrypt
+from core.db_connector import DatabaseConnector
+from datetime import datetime
+
+class AuthManager:
+    @staticmethod
+    def verify_login(email, password):
+        """
+        Ελέγχει τα στοιχεία εισόδου.
+        Περιλαμβάνει καθαρισμό (trim) για κινητά.
+        """
+        # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT (Αυτό λύνει το πρόβλημα του κινητού)
+        # Σβήνει κενά (space) από την αρχή και το τέλος
+        # Μετατρέπει τα κεφαλαία σε μικρά για το email
+        if email:
+            email = email.strip().lower()
+        else:
+            return None, "Email required"
+            
+        if password:
+            password = password.strip()
+        else:
+            return None, "Password required"
+
+        # 2. ΛΗΨΗ ΧΡΗΣΤΩΝ ΑΠΟ ΤΗ ΒΑΣΗ
+        users = DatabaseConnector.fetch_data("Users")
+        if users.empty: 
+            return None, "No users found in database"
+
+        # 3. ΑΝΑΖΗΤΗΣΗ ΧΡΗΣΤΗ
+        user = users[users['email'] == email]
+        
+        if user.empty: 
+            return None, "User not found"
+        
+        user_data = user.iloc[0]
+        stored_hash = user_data['password_hash']
+        
+        # 4. ΕΛΕΓΧΟΣ ΚΩΔΙΚΟΥ
+        try:
+            # Περίπτωση Α: Παλιός κωδικός (απλό κείμενο - Legacy)
+            if not stored_hash.startswith('$2b$'):
+                if stored_hash == password:
+                    # Αν είναι σωστός, ελέγχουμε αν είναι Active
+                    if user_data['role'] == 'active' or user_data['role'] == 'admin':
+                        return user_data.to_dict(), "OK"
+                    else:
+                        return None, "Account Pending Approval"
+                else:
+                    return None, "Wrong password"
+            
+            # Περίπτωση Β: Νέος ασφαλής κωδικός (Hash - Bcrypt)
+            if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                # Έλεγχος ρόλου (Active ή Admin)
+                if user_data['role'] == 'active' or user_data['role'] == 'admin':
+                    return user_data.to_dict(), "OK"
+                else:
+                    return None, "Account Pending Approval" # Περιμένει έγκριση
+            else:
+                return None, "Wrong password"
+        except Exception as e:
+            return None, f"Auth Error: {str(e)}"
+
+    @staticmethod
+    def register_new_user(email, name, password):
+        """
+        Εγγράφει νέο χρήστη ως 'pending'.
+        """
+        # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT
+        if email: email = email.strip().lower()
+        if name: name = name.strip()
+        if password: password = password.strip()
+
+        if not email or not password:
+            return False
+
+        # 2. ΕΛΕΓΧΟΣ ΑΝ ΥΠΑΡΧΕΙ ΗΔΗ
+        users = DatabaseConnector.fetch_data("Users")
+        if not users.empty and email in users['email'].values:
+            return False # Το email υπάρχει ήδη
+        
+        # 3. ΚΡΥΠΤΟΓΡΑΦΗΣΗ (HASHING)
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # 4. ΔΗΜΙΟΥΡΓΙΑ ΕΓΓΡΑΦΗΣ
+        new_user = [
+            str(datetime.now()), # Timestamp
+            email,
+            name,
+            hashed,
+            "pending" # Role (Μπαίνει ως 'pending' και θέλει έγκριση από Admin)
+        ]
+        
+        return DatabaseConnector.append_data("Users", new_user)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\config_loader.py
+==================================================
+"""
+CORE MODULE: CONFIG LOADER
+--------------------------
+Centralized configuration management.
+Loads secrets safely for Drive, Sheets, and Gemini.
+"""
+
+import streamlit as st
+import logging
+
+logger = logging.getLogger("Core.Config")
+
+class ConfigLoader:
+    """Διαχειριστής Ρυθμίσεων & Μυστικών Κλειδιών."""
+
+    @staticmethod
+    def get_gemini_key():
+        """Ανακτά το API Key για το AI (ψάχνει παντού)."""
+        # 1. Έλεγχος στο [general] section
+        try:
+            return st.secrets["general"]["GEMINI_KEY"]
+        except: pass
+        
+        # 2. Έλεγχος στο root level (παλιά μέθοδος)
+        try:
+            return st.secrets["GEMINI_KEY"]
+        except: pass
+        
+        # 3. Έλεγχος στα environment variables (για local testing)
+        try:
+            import os
+            return os.environ.get("GEMINI_KEY")
+        except: pass
+
+        logger.error("Gemini Key not found in secrets.")
+        return None
+
+    @staticmethod
+    def get_drive_folder_id():
+        """Ανακτά το ID του κεντρικού φακέλου στο Drive."""
+        try:
+            return st.secrets["drive_config"]["folder_id"]
+        except:
+            # Fallback αν είναι χύμα
+            try: return st.secrets["DRIVE_FOLDER_ID"]
+            except: return None
+
+    @staticmethod
+    def get_service_account_info():
+        """Ανακτά τα credentials του Service Account."""
+        try:
+            # Μετατροπή σε dict γιατί το streamlit το δίνει ως AttrDict
+            return dict(st.secrets["gcp_service_account"])
+        except Exception:
+            # logger.critical("GCP Service Account secrets missing.")
+            return None
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\drive_manager.py
+==================================================
+"""
+CORE MODULE: DRIVE MANAGER (Low Level)
+--------------------------------------
+Handles direct API calls to Google Drive v3.
+"""
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+import io
+import logging
+from core.config_loader import ConfigLoader
+
+logger = logging.getLogger("Core.Drive")
+SCOPES = ['https://www.googleapis.com/auth/drive']
+
+class DriveManager:
+    """Χειριστής Google Drive API."""
+
+    def __init__(self):
+        self.service = self._authenticate()
+
+    def _authenticate(self):
+        """Εσωτερική μέθοδος σύνδεσης."""
+        creds_info = ConfigLoader.get_service_account_info()
+        if not creds_info: return None
+        
+        try:
+            creds = service_account.Credentials.from_service_account_info(
+                creds_info, scopes=SCOPES
+            )
+            return build('drive', 'v3', credentials=creds)
+        except Exception as e:
+            logger.critical(f"Drive Auth Failed: {e}")
+            return None
+
+    def list_files_in_folder(self, folder_id):
+        """Επιστρέφει λίστα αρχείων μέσα σε φάκελο."""
+        if not self.service: return []
+        
+        query = f"'{folder_id}' in parents and trashed = false"
+        try:
+            results = self.service.files().list(
+                q=query, fields="files(id, name, mimeType, webViewLink, parents)"
+            ).execute()
+            return results.get('files', [])
+        except Exception as e:
+            logger.error(f"List Files Error: {e}")
+            return []
+
+    def create_folder(self, name, parent_id):
+        """Δημιουργεί φάκελο αν δεν υπάρχει."""
+        if not self.service: return None
+
+        # 1. Έλεγχος αν υπάρχει ήδη
+        query = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        try:
+            existing = self.service.files().list(q=query, fields="files(id)").execute()
+            files = existing.get('files', [])
+            if files:
+                return files[0]['id'] # Επιστροφή υπάρχοντος
+            
+            # 2. Δημιουργία νέου
+            metadata = {
+                'name': name,
+                'mimeType': 'application/vnd.google-apps.folder',
+                'parents': [parent_id]
+            }
+            folder = self.service.files().create(body=metadata, fields='id').execute()
+            logger.info(f"Created folder: {name}")
+            return folder.get('id')
+        except Exception as e:
+            logger.error(f"Create Folder Error: {e}")
+            return None
+
+    def move_file(self, file_id, target_folder_id):
+        """Μετακινεί ένα αρχείο σε νέο φάκελο."""
+        if not self.service: return False
+        try:
+            # Ανάκτηση τωρινών γονέων
+            file = self.service.files().get(fileId=file_id, fields='parents').execute()
+            previous_parents = ",".join(file.get('parents'))
+            
+            # Μετακίνηση
+            self.service.files().update(
+                fileId=file_id,
+                addParents=target_folder_id,
+                removeParents=previous_parents
+            ).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Move File Error: {e}")
+            return False
+
+    def download_file_content(self, file_id):
+        """Κατεβάζει το περιεχόμενο ενός αρχείου (π.χ. PDF) στη μνήμη."""
+        if not self.service: return None
+        try:
+            request = self.service.files().get_media(fileId=file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            fh.seek(0)
+            return fh
+        except Exception as e:
+            logger.error(f"Download Error: {e}")
+            return None
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\core\ai_engine.py
+==================================================
+import google.generativeai as genai
+import logging
+import pypdf
+from core.config_loader import ConfigLoader
+
+logger = logging.getLogger("Core.AI")
+
+class AIEngine:
+    def __init__(self):
+        self.api_key = ConfigLoader.get_gemini_key()
+        self.model = None
+        self.last_error = None
+        self._setup()
+
+    def _setup(self):
+        if not self.api_key:
+            self.last_error = "MISSING API KEY"
+            return
+        try:
+            genai.configure(api_key=self.api_key)
+            # Smart Auto-Discovery: Ρωτάμε ποια μοντέλα είναι διαθέσιμα
+            available_models = []
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+            except: pass
+
+            preferred = ["models/gemini-1.5-pro", "models/gemini-1.5-flash", "models/gemini-pro"]
+            selected = None
+            for p in preferred:
+                if p in available_models:
+                    selected = p
+                    break
+            if not selected and available_models: selected = available_models[0]
+
+            if selected:
+                self.model = genai.GenerativeModel(selected)
+                self.last_error = None
+            else:
+                self.last_error = "No valid model found."
+        except Exception as e:
+            self.last_error = str(e)
+
+    def _extract_text_from_pdfs(self, pdf_files):
+        text = ""
+        if not pdf_files: return ""
+        for pdf in pdf_files:
+            try:
+                reader = pypdf.PdfReader(pdf)
+                limit = min(len(reader.pages), 15)
+                text += f"\n--- USER UPLOADED FILE: {pdf.name} ---\n"
+                for i in range(limit):
+                    t = reader.pages[i].extract_text()
+                    if t: text += t + "\n"
+            except: pass
+        return text
+
+    def get_chat_response(self, chat_history, context_files="", lang="gr", images=None, audio=None, pdf_files=None):
+        if not self.model: return f"⚠️ AI Offline ({self.last_error})"
+        
+        target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
+        
+        # --- ΕΝΤΟΛΕΣ: VERIFY RELEVANCE & CITE SOURCES ---
+        system_instruction = f"""
+        ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
+        
+        CONTEXT DATA (Best Matching Manuals): {context_files}
+        
+        CRITICAL INSTRUCTION ON SOURCES:
+        I have provided you with the CLOSEST MATCHING MANUALS found based on keywords.
+        1. **VERIFY RELEVANCE**: Check if the manual provided belongs to the same **Product Family** or is technically similar to the user's device (e.g., "Next Evo" manual is relevant for "Next Evo X").
+        2. **USE IT**: If it is relevant, answer using the manual and cite it: "📖 **Πηγή / Source:** [Filename]".
+        3. **FALLBACK**: Only if the manual is COMPLETELY UNRELATED (e.g. Air Conditioner manual for a Boiler question), ignore it and use General Knowledge, stating: "⚠️ **Πηγή / Source:** Γενική Γνώση / General Knowledge (Manual not found)".
+        
+        OUTPUT FORMAT:
+        - Diagnosis (Cause)
+        - Solution (Steps 1, 2, 3...)
+        - Tools needed
+        
+        LANGUAGE: Answer ONLY in {target_lang}.
+        """
+
+        try:
+            msg_parts = [system_instruction]
+            if pdf_files:
+                msg_parts.append(self._extract_text_from_pdfs(pdf_files))
+            if images:
+                for img in images:
+                    msg_parts.append(img)
+                    msg_parts.append("Analyze this image.")
+            if audio:
+                msg_parts.append({"mime_type": "audio/wav", "data": audio.getvalue()})
+
+            last_msg = next((m['content'] for m in reversed(chat_history) if m['role'] == 'user'), "")
+            if last_msg: msg_parts.append(f"Question: {last_msg}")
+
+            response = self.model.generate_content(msg_parts)
+            return response.text
+        except Exception as e:
+            return f"⚠️ AI Error: {str(e)}"
+
+    def extract_metadata_from_text(self, text, filename):
+        try: return self.model.generate_content(f"Classify CATEGORY|BRAND|MODEL|TYPE for: {filename}\n{text[:500]}").text
+        except: return "Unsorted|Unknown|Unknown|Manual"
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\__init__.py
+==================================================
+
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_chat.py
+==================================================
+import streamlit as st
+import json
+import os
+from core.language_pack import get_text
+from core.ai_engine import AIEngine
+from PIL import Image
+
+def load_cached_library():
+    """Φορτώνει τη βιβλιοθήκη από το αρχείο JSON."""
+    try:
+        if os.path.exists("drive_index.json"):
+            with open("drive_index.json", "r", encoding="utf-8") as f:
+                return json.load(f)
+    except: pass
+    return []
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+
+    st.header(f"{get_text('menu_chat', lang)}")
+
+    brain = AIEngine()
+    
+    # 1. ΦΟΡΤΩΣΗ ΒΙΒΛΙΟΘΗΚΗΣ
+    if 'library_cache' not in st.session_state or not st.session_state.library_cache:
+        st.session_state.library_cache = load_cached_library()
+
+    # 2. ΑΡΧΙΚΟΠΟΙΗΣΗ ΙΣΤΟΡΙΚΟΥ
+    if "messages" not in st.session_state: st.session_state.messages = []
+    
+    # 3. ΜΝΗΜΗ "STICKY CONTEXT" (Για να θυμάται το manual στη 2η ερώτηση)
+    if "active_manuals" not in st.session_state:
+        st.session_state.active_manuals = [] 
+
+    # Εμφάνιση Μηνυμάτων
+    if not st.session_state.messages:
+        st.info(get_text('chat_intro', lang))
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    st.divider()
+    
+    # --- ΖΩΝΗ ΠΟΛΥΜΕΣΩΝ (Κάμερα, Μικρόφωνο, Αρχεία) ---
+    captured_image = None
+    captured_audio = None
+    uploaded_files = []
+
+    with st.expander(f"📎 {get_text('media_expander', lang)} / Uploads", expanded=False):
+        t1, t2, t3 = st.tabs(["📸 Camera", "🎙️ Voice", "📂 Files (PDF/Img)"])
+        
+        with t1:
+            img_input = st.camera_input(get_text('camera_label', lang))
+            if img_input:
+                captured_image = Image.open(img_input)
+                st.success("📸 Image Ready!")
+        with t2:
+            audio_val = st.audio_input(get_text('audio_label', lang))
+            if audio_val:
+                captured_audio = audio_val
+                st.success("🎙️ Audio Recorded!")
+        with t3:
+            uploaded_files = st.file_uploader("Manuals/Photos", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
+            if uploaded_files: st.success(f"📎 {len(uploaded_files)} files.")
+
+    # --- INPUT AREA ---
+    prompt_placeholder = get_text('chat_placeholder', lang)
+    if captured_audio or captured_image or uploaded_files:
+        prompt_placeholder = "Press Enter to send..."
+
+    prompt = st.chat_input(prompt_placeholder)
+    
+    if prompt or captured_audio or captured_image or uploaded_files:
+        
+        final_prompt = prompt if prompt else "(Sent Media)"
+
+        st.session_state.messages.append({"role": "user", "content": final_prompt})
+        with st.chat_message("user"): 
+            st.markdown(final_prompt)
+            if captured_image: st.image(captured_image, width=250)
+            if captured_audio: st.audio(captured_audio)
+            if uploaded_files: 
+                for f in uploaded_files: st.caption(f"📎 {f.name}")
+
+        # ---------------------------------------------------------
+        # 🟢 ΒΕΛΤΙΩΣΗ: RANKING SYSTEM (Βαθμολογία Ταιριάσματος)
+        # ---------------------------------------------------------
+        found_files_names = ""
+        
+        if prompt:
+            # Αφαίρεση κοινών λέξεων (Stopwords) για να εστιάσουμε στο μοντέλο
+            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the", "in", "on"]
+            raw_keywords = prompt.lower().split()
+            keywords = [w for w in raw_keywords if w not in stopwords and len(w) > 1]
+            
+            library = st.session_state.library_cache
+            scored_results = [] # Λίστα μορφής: (Score, Item)
+            
+            if library:
+                for item in library:
+                    # Ενώνουμε όνομα και metadata
+                    target_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
+                    
+                    matches = 0
+                    for word in keywords:
+                        if word in target_text:
+                            matches += 1
+                    
+                    # Αν έχει έστω και ένα σημαντικό ταίριασμα
+                    if matches > 0:
+                        scored_results.append((matches, item))
+            
+            # Ταξινόμηση: Πρώτα αυτά με τα περισσότερα matches (π.χ. 4/4)
+            scored_results.sort(key=lambda x: x[0], reverse=True)
+            
+            # Παίρνουμε τα top 3
+            top_matches = [item for score, item in scored_results[:3]]
+
+            # 🟢 ΛΟΓΙΚΗ STICKY MEMORY
+            if top_matches:
+                # Βρήκαμε νέα; Ανανεώνουμε τη μνήμη.
+                st.session_state.active_manuals = top_matches
+            else:
+                # Δεν βρήκαμε; Κρατάμε τα παλιά (δεν κάνουμε τίποτα).
+                pass
+            
+            found_files_names = ", ".join([f['name'] for f in st.session_state.active_manuals])
+
+        # ---------------------------------------------------------
+
+        # --- AI GENERATION ---
+        with st.chat_message("assistant"):
+            with st.spinner(get_text('chat_thinking', lang)):
+                images_to_send = [captured_image] if captured_image else []
+                pdfs_to_process = []
+                for f in uploaded_files:
+                    if f.type == "application/pdf": pdfs_to_process.append(f)
+                    elif f.type.startswith("image/"): images_to_send.append(Image.open(f))
+
+                response_text = brain.get_chat_response(
+                    st.session_state.messages, 
+                    context_files=found_files_names, # Στέλνουμε τα "Persistent" manuals
+                    lang=lang,
+                    images=images_to_send,
+                    audio=captured_audio,
+                    pdf_files=pdfs_to_process
+                )
+                st.markdown(response_text)
+                
+                # Εμφάνιση των Manuals που "βλέπει" το AI
+                if st.session_state.active_manuals:
+                    with st.expander("📚 Active Context (Manuals Used)"):
+                        for f in st.session_state.active_manuals:
+                            link = f.get('link') or f.get('webViewLink')
+                            if link: st.markdown(f"📄 **[{f['name']}]({link})**")
+                            else: st.markdown(f"📄 **{f['name']}**")
+
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": response_text, 
+            "sources": st.session_state.active_manuals 
+        })
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_organizer.py
+==================================================
+import streamlit as st
+from services.sorter_logic import SorterService
+from core.language_pack import get_text
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    st.header(get_text('menu_organizer', lang))
+    
+    st.markdown(f"""
+    <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b;'>
+        {get_text('org_desc', lang)}
+    </div>
+    """, unsafe_allow_html=True)
+    st.write("")
+
+    if st.button(f"🚀 {get_text('org_start', lang)}", type="primary", use_container_width=True):
+        sorter = SorterService()
+        st.divider()
+        st.subheader(get_text('org_log', lang))
+        
+        log_box = st.container(height=300, border=True)
+        def update_ui(msg, type_):
+            with log_box:
+                if type_ == "info": st.info(msg)
+                elif type_ == "success": st.success(msg)
+                elif type_ == "error": st.error(msg)
+                else: st.write(f"⚙️ {msg}")
+
+        sorter.process_unsorted_files(update_ui)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_search.py
+==================================================
+import streamlit as st
+import json  # <--- ΑΠΑΡΑΙΤΗΤΟ για την αποθήκευση
+import os    # <--- ΑΠΑΡΑΙΤΗΤΟ για έλεγχο αρχείων
+from services.sync_service import SyncService
+from core.language_pack import get_text
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    
+    st.header(get_text('menu_library', lang))
+    
+    # --- ΚΟΥΜΠΙ ΣΥΓΧΡΟΝΙΣΜΟΥ ---
+    if st.button("🔄 Sync Library / Ανανέωση Βιβλιοθήκης", use_container_width=True):
+        with st.spinner("⏳ Γίνεται σάρωση του Google Drive (Scanning)..."):
+            try:
+                srv = SyncService()
+                # 1. Σάρωση από το Drive
+                data = srv.scan_library()
+                
+                # 2. Ενημέρωση της Μνήμης (Session State)
+                st.session_state.library_cache = data
+                
+                # 3. ΑΠΟΘΗΚΕΥΣΗ ΣΤΟ ΔΙΣΚΟ (Η ΔΙΟΡΘΩΣΗ)
+                # Αυτό δημιουργεί το αρχείο που ψάχνει το Chat
+                with open("drive_index.json", "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                
+                st.success(f"✅ Ολοκληρώθηκε! Αποθηκεύτηκαν {len(data)} αρχεία στο 'drive_index.json'.")
+                
+            except Exception as e:
+                st.error(f"❌ Σφάλμα Συγχρονισμού: {e}")
+
+    st.divider()
+
+    # --- ΛΟΓΙΚΗ ΦΟΡΤΩΣΗΣ (PERSISTENCE) ---
+    # Αν η μνήμη είναι άδεια, προσπαθούμε να φορτώσουμε από το αρχείο
+    if 'library_cache' not in st.session_state or not st.session_state.library_cache:
+        if os.path.exists("drive_index.json"):
+            try:
+                with open("drive_index.json", "r", encoding="utf-8") as f:
+                    st.session_state.library_cache = json.load(f)
+            except:
+                pass # Αν αποτύχει, θα μείνει κενό
+
+    # Παίρνουμε τα δεδομένα (είτε από το Sync που μόλις έγινε, είτε από το αρχείο)
+    data = st.session_state.get('library_cache', [])
+    
+    # Αν ακόμα είναι κενό, σημαίνει ότι δεν έχει γίνει ποτέ Sync
+    if not data:
+        st.info("ℹ️ Η βιβλιοθήκη είναι κενή. Πατήστε το κουμπί 'Sync Library' για να δημιουργήσετε το ευρετήριο.")
+    
+    # --- UI ΑΝΑΖΗΤΗΣΗΣ ---
+    query = st.text_input("🔎 Αναζήτηση Manual (Μάρκα, Μοντέλο, Κωδικός)...", placeholder="π.χ. Ariston Clas One").lower()
+    
+    if query:
+        results = []
+        for d in data:
+            # Ψάχνουμε στο όνομα ΚΑΙ στα metadata
+            searchable_text = (d.get('name', '') + " " + d.get('search_terms', '')).lower()
+            if query in searchable_text:
+                results.append(d)
+
+        if results:
+            st.success(f"Βρέθηκαν {len(results)} έγγραφα:")
+            for res in results:
+                with st.container(border=True):
+                    c1, c2 = st.columns([3, 1])
+                    with c1:
+                        st.write(f"📄 **{res['name']}**")
+                        # Προαιρετικά δείχνουμε και το μοντέλο αν υπάρχει στα metadata
+                        if 'real_model' in res:
+                            st.caption(f"Model: {res['real_model']}")
+                    with c2:
+                        link = res.get('link') or res.get('webViewLink')
+                        if link:
+                            st.link_button("📂 Άνοιγμα", link, use_container_width=True)
+                        else:
+                            st.warning("No Link")
+        else:
+            st.warning("Δεν βρέθηκαν αποτελέσματα.")
+            
+    elif data:
+        # Αν δεν ψάχνει κάτι, δείχνουμε σύνοψη
+        st.caption(f"Σύνολο αρχείων στη βάση: {len(data)}")
+        with st.expander("📂 Προβολή όλων των αρχείων"):
+            st.dataframe(data)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_clients.py
+==================================================
+import streamlit as st
+from core.db_connector import DatabaseConnector
+from core.language_pack import get_text
+
+def render(user):
+    st.header(get_text('menu_clients', st.session_state.lang))
+    
+    # Fetch Data
+    df = DatabaseConnector.fetch_data("Clients")
+    
+    if df.empty:
+        st.info("No clients found.")
+    else:
+        search = st.text_input("Search Client...")
+        if search:
+            df = df[df.astype(str).apply(lambda x: x.str.contains(search, case=False)).any(axis=1)]
+        
+        st.dataframe(df, use_container_width=True)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_admin_panel.py
+==================================================
+import streamlit as st
+from core.db_connector import DatabaseConnector
+from core.language_pack import get_text
+import pandas as pd
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    st.title(get_text('admin_title', lang))
+    
+    # Φόρτωση Χρηστών
+    users = DatabaseConnector.fetch_data("Users")
+    if users.empty:
+        st.warning(get_text('admin_no_users', lang))
+        return
+
+    # --- 1. ΑΙΤΗΜΑΤΑ ΓΙΑ ΕΓΚΡΙΣΗ ---
+    st.subheader(get_text('admin_pending', lang))
+    
+    # Βρίσκουμε ποιοι είναι 'pending'
+    pending_mask = users['role'] == 'pending'
+    pending_users = users[pending_mask]
+
+    if pending_users.empty:
+        st.success(get_text('admin_no_pending', lang))
+    else:
+        for index, row in pending_users.iterrows():
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([3, 1, 1])
+                c1.write(f"👤 **{row['name']}**")
+                c1.caption(f"📧 {row['email']} | 📅 {row['created_at']}")
+                
+                # Κουμπί Ενεργοποίησης
+                if c2.button(get_text('admin_btn_activate', lang), key=f"act_{index}", use_container_width=True):
+                    users.at[index, 'role'] = 'active'
+                    if DatabaseConnector.update_all_data("Users", users):
+                        st.success(f"{get_text('admin_msg_active', lang)} ({row['name']})")
+                        st.rerun()
+                    else:
+                        st.error("Error Saving.")
+
+                # Κουμπί Διαγραφής
+                if c3.button(get_text('admin_btn_delete', lang), key=f"del_{index}", use_container_width=True):
+                    users = users.drop(index)
+                    if DatabaseConnector.update_all_data("Users", users):
+                        st.warning(get_text('admin_msg_del', lang))
+                        st.rerun()
+
+    st.divider()
+
+    # --- 2. ΟΛΟΙ ΟΙ ΧΡΗΣΤΕΣ ---
+    with st.expander(get_text('admin_all_users', lang)):
+        st.dataframe(users)
+        st.caption(get_text('admin_all_users_cap', lang))
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_tech_specs.py
+==================================================
+import streamlit as st
+import sys
+from core.language_pack import get_text
+
+def render(user):
+    # Security Check: Μόνο Admin
+    if user['role'] != 'admin':
+        st.error("Access Denied.")
+        return
+
+    st.header(get_text('specs_title', st.session_state.lang))
+    
+    st.markdown("### 🧬 System Architecture")
+    st.code("""
+    Architecture: Modular Monolith
+    Core: Python 3.x + Streamlit
+    Database: Google Sheets (via Service Account)
+    Storage: Google Drive API v3
+    AI Engine: Google Gemini 1.5 Flash
+    """, language="yaml")
+    
+    st.markdown("### 📊 Status Monitor")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Python Version", sys.version.split()[0])
+        st.metric("Session Cache", f"{len(st.session_state)} Objects")
+    
+    with c2:
+        st.metric("User Role", user['role'].upper())
+        st.metric("Language", st.session_state.lang.upper())
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_help_user.py
+==================================================
+import streamlit as st
+from core.language_pack import get_text
+
+def render(user):
+    st.header(get_text('help_title', st.session_state.lang))
+    
+    st.info("ℹ️ Οδηγός Χρήσης Mastro Nek AI")
+    
+    with st.expander("💬 Πώς χρησιμοποιώ το Chat;"):
+        st.write("""
+        1. Πήγαινε στο μενού 'Chat'.
+        2. Γράψε την ερώτησή σου στο κάτω μέρος.
+        3. Μπορείς να ανεβάσεις φωτογραφίες ή PDF από το συνδετήρα.
+        """)
+        
+    with st.expander("🔎 Πώς βρίσκω Manuals;"):
+        st.write("""
+        1. Πήγαινε στη 'Βιβλιοθήκη'.
+        2. Γράψε το μοντέλο ή τη μάρκα.
+        3. Πάτα το Link για να ανοίξει το PDF.
+        """)
+        
+    with st.expander("🧠 Πώς λειτουργεί ο Organizer (Admin);"):
+        st.write("""
+        1. Πήγαινε στο 'AI Organizer'.
+        2. Πάτα 'Έναρξη'.
+        3. Το σύστημα θα διαβάσει τα ατακτοποίητα PDF και θα τα βάλει σε φακέλους αυτόματα.
+        """)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_tools.py
+==================================================
+import streamlit as st
+from core.language_pack import get_text
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    st.header(get_text('menu_tools', lang))
+    
+    st.markdown("""<style>div.stButton > button:first-child {height: 3em; font-size: 18px; font-weight: bold;}</style>""", unsafe_allow_html=True)
+
+    tab1, tab2, tab3 = st.tabs([get_text('tool_btu_tab', lang), get_text('tool_conv_tab', lang), get_text('tool_pipe_tab', lang)])
+    
+    # --- BTU CALC ---
+    with tab1:
+        c1, c2 = st.columns(2)
+        with c1:
+            area = st.number_input(get_text('tool_area', lang), min_value=5, value=25)
+            height = st.number_input(get_text('tool_height', lang), min_value=2.0, value=2.8, step=0.1)
+        
+        with c2:
+            # Δημιουργούμε λίστες επιλογών που αντιστοιχούν στις μεταφράσεις
+            ins_opts = [get_text('ins_good', lang), get_text('ins_avg', lang), get_text('ins_bad', lang)]
+            sun_opts = [get_text('sun_low', lang), get_text('sun_med', lang), get_text('sun_high', lang)]
+            
+            insulation = st.selectbox(get_text('tool_insulation', lang), ins_opts)
+            sun = st.selectbox(get_text('tool_sun', lang), sun_opts)
+            
+        # Logic (Βασίζεται στο index για να δουλεύει ανεξαρτήτως γλώσσας)
+        # Index 0: Good/Low, 1: Avg/Med, 2: Bad/High
+        ins_idx = ins_opts.index(insulation)
+        sun_idx = sun_opts.index(sun)
+
+        base_factor = 400
+        if ins_idx == 0: base_factor = 350
+        elif ins_idx == 1: base_factor = 450
+        elif ins_idx == 2: base_factor = 600
+        
+        if sun_idx == 2: base_factor += 100
+        elif sun_idx == 0: base_factor -= 50
+        
+        final_factor = base_factor * (height / 3.0) if height > 3.0 else base_factor
+        btu_result = int(area * final_factor)
+        kw_result = round(btu_result / 3412, 2)
+        
+        st.divider()
+        st.success(f"📊 {get_text('tool_calc_res', lang)}: **{btu_result:,} BTU/h** ({kw_result} kW)")
+        
+        rec = "9000" if btu_result < 9000 else "12000" if btu_result < 13000 else "18000" if btu_result < 19000 else "24000"
+        st.info(f"💡 {get_text('tool_rec', lang)}: **{rec} BTU**")
+
+    # --- CONVERTER ---
+    with tab2:
+        val = st.number_input("Value", value=1.0)
+        c_type = st.radio("Type", ["Bar -> PSI", "C -> F", "kW -> BTU"])
+        if c_type == "Bar -> PSI": st.write(f"➡️ **{round(val * 14.5038, 2)} PSI**")
+        elif c_type == "C -> F": st.write(f"➡️ **{round((val * 9/5) + 32, 1)} °F**")
+        elif c_type == "kW -> BTU": st.write(f"➡️ **{int(val * 3412)} BTU/h**")
+
+    # --- PIPING ---
+    with tab3:
+        st.subheader("R32/R410a Guide")
+        data = {
+            "BTU": ["9.000", "12.000", "18.000", "24.000"],
+            get_text('pipe_liquid', lang): ["1/4''", "1/4''", "1/4''", "3/8''"],
+            get_text('pipe_gas', lang): ["3/8''", "1/2''", "1/2''", "5/8''"]
+        }
+        st.table(data)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_dashboard.py
+==================================================
+import streamlit as st
+from core.language_pack import get_text
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    
+    # Τίτλος & Υπότιτλος (Μεταφρασμένα)
+    st.title(f"{get_text('dash_welcome', lang)}, {user['name']}")
+    st.markdown(f"### {get_text('dash_subtitle', lang)}")
+    st.divider()
+
+    # --- Γρήγορες Ενέργειες ---
+    st.subheader(get_text('dash_quick', lang))
+    
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.info(f"🤖 **{get_text('dash_chat_card', lang)}**")
+        st.write(get_text('dash_chat_desc', lang))
+        # Χρησιμοποιούμε κενό κουμπί που απλά ενημερώνει (για UX)
+        if st.button(get_text('dash_btn_chat', lang), use_container_width=True):
+             st.info("Select 'AI Chat' from the left menu.")
+
+    with col2:
+        st.warning(f"📚 **{get_text('dash_lib_card', lang)}**")
+        st.write(get_text('dash_lib_desc', lang))
+        if st.button(get_text('dash_btn_lib', lang), use_container_width=True):
+             st.info("Select 'Manuals Library' from the left menu.")
+
+    with col3:
+        st.success(f"🧮 **{get_text('dash_tool_card', lang)}**")
+        st.write(get_text('dash_tool_desc', lang))
+        if st.button(get_text('dash_btn_tool', lang), use_container_width=True):
+             st.info("Select 'Tools' from the left menu.")
+
+    st.divider()
+    st.caption(get_text('dash_status', lang))
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\services\__init__.py
+==================================================
+
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\services\sync_service.py
+==================================================
+"""
+SERVICE: SYNC SERVICE
+---------------------
+Scans Google Drive recursively and builds the library index.
+"""
+import streamlit as st
+from core.drive_manager import DriveManager
+from core.config_loader import ConfigLoader
+import logging
+
+logger = logging.getLogger("Service.Sync")
+
+class SyncService:
+    def __init__(self):
+        self.drive = DriveManager()
+        self.root_id = ConfigLoader.get_drive_folder_id()
+
+    def scan_library(self):
+        """Σαρώνει όλο το Drive και επιστρέφει λίστα αρχείων (Metadata)."""
+        if not self.root_id: return []
+        
+        all_files = []
+        folders_to_scan = [self.root_id]
+        scanned_folders = set()
+
+        # Iterative scanning (για να μην κολλήσει σε recursive loop)
+        while folders_to_scan:
+            current_id = folders_to_scan.pop(0)
+            if current_id in scanned_folders: continue
+            
+            items = self.drive.list_files_in_folder(current_id)
+            scanned_folders.add(current_id)
+
+            for item in items:
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    folders_to_scan.append(item['id'])
+                elif item['mimeType'] == 'application/pdf':
+                    # Εξαγωγή Metadata από το όνομα
+                    # Υποθέτουμε ότι ο Organizer τα έχει ονομάσει σωστά ή είναι σε φακέλους
+                    meta = self._parse_metadata(item)
+                    all_files.append(meta)
+        
+        return all_files
+
+    def _parse_metadata(self, item):
+        """Εξάγει πληροφορίες από το αρχείο."""
+        # Εδώ θα μπορούσαμε να πάρουμε και το path των γονέων για να βρούμε μάρκα
+        return {
+            'file_id': item['id'],
+            'name': item['name'],
+            'link': item.get('webViewLink', ''),
+            'mime': item['mimeType']
+        }
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\services\sorter_logic.py
+==================================================
+"""
+SERVICE: AI SORTER LOGIC (DEEP CONTENT ANALYSIS)
+------------------------------------------------
+Features:
+- Reads PDF Content (First 15 pages -> Fallback to Full)
+- 4-Level Hierarchy (Category > Brand > Model > Type)
+- Quarantine for unknown files (_MANUAL_REVIEW)
+"""
+import streamlit as st
+from core.drive_manager import DriveManager
+from core.ai_engine import AIEngine
+from core.config_loader import ConfigLoader
+import logging
+import time
+import io
+import pypdf
+
+logger = logging.getLogger("Service.Sorter")
+
+# Φάκελοι που αγνοούμε (για να μην ξανα-σκανάρει τα τακτοποιημένα)
+IGNORED_FOLDERS = ["Boilers", "AirConditioners", "HeatPumps", "Solar", "Controllers", "WaterHeaters", "_MANUAL_REVIEW"]
+
+class SorterService:
+    def __init__(self):
+        self.drive = DriveManager()
+        self.ai = AIEngine()
+        self.root_id = ConfigLoader.get_drive_folder_id()
+
+    def _extract_text_from_pdf(self, file_id, pages_to_read=15):
+        """
+        Κατεβάζει το PDF στη μνήμη και εξάγει κείμενο.
+        Πρώτα δοκιμάζει τις πρώτες X σελίδες.
+        """
+        try:
+            # 1. Λήψη αρχείου στη μνήμη (χωρίς αποθήκευση στο δίσκο)
+            file_stream = self.drive.download_file_content(file_id)
+            if not file_stream: return None
+
+            # 2. Ανάγνωση PDF
+            reader = pypdf.PdfReader(file_stream)
+            total_pages = len(reader.pages)
+            text = ""
+            
+            # Διάβασμα των πρώτων X σελίδων
+            limit = min(pages_to_read, total_pages)
+            for i in range(limit):
+                page_text = reader.pages[i].extract_text()
+                if page_text: text += page_text + "\n"
+
+            # 3. Fallback: Αν το κείμενο είναι πολύ λίγο (<200 chars), διάβασε ΟΛΟ το αρχείο
+            if len(text) < 200 and total_pages > limit:
+                # logger.info("Low text detected. Reading full document...")
+                for i in range(limit, total_pages):
+                    page_text = reader.pages[i].extract_text()
+                    if page_text: text += page_text + "\n"
+
+            return text
+        except Exception as e:
+            logger.error(f"PDF Read Error: {e}")
+            return None
+
+    def _find_all_pdfs_recursively(self, folder_id, status_callback, depth=0):
+        """Αναδρομική εύρεση PDF, αγνοώντας τους 'Ιερούς' φακέλους."""
+        if depth > 4: return [] 
+        
+        all_pdfs = []
+        try:
+            items = self.drive.list_files_in_folder(folder_id)
+            for item in items:
+                if item['mimeType'] == 'application/pdf':
+                    all_pdfs.append(item)
+                elif item['mimeType'] == 'application/vnd.google-apps.folder':
+                    if depth == 0 and item['name'] in IGNORED_FOLDERS:
+                        continue
+                    status_callback(f"📂 Σάρωση: {item['name']}...", "info")
+                    all_pdfs.extend(self._find_all_pdfs_recursively(item['id'], status_callback, depth + 1))
+        except: pass
+        return all_pdfs
+
+    def process_unsorted_files(self, status_callback):
+        """Κύρια διαδικασία Deep Sorting."""
+        if not self.root_id:
+            status_callback("❌ Σφάλμα: Δεν βρέθηκε Root Folder ID.", "error")
+            return
+
+        status_callback("🕵️ Έναρξη Βαθιάς Ανάλυσης Περιεχομένου...", "running")
+        
+        # 1. Εύρεση όλων των PDF
+        pdfs = self._find_all_pdfs_recursively(self.root_id, status_callback)
+        if not pdfs:
+            status_callback("✅ Δεν βρέθηκαν αρχεία προς ταξινόμηση.", "success")
+            return
+
+        status_callback(f"🔎 Βρέθηκαν {len(pdfs)} αρχεία. Ξεκινά η μελέτη...", "info")
+        
+        count = 0
+        manual_review_count = 0
+
+        for pdf in pdfs:
+            status_callback(f"📖 Μελέτη αρχείου: {pdf['name']}...", "running")
+            
+            try:
+                # A. Εξαγωγή Κειμένου (Deep Read)
+                pdf_text = self._extract_text_from_pdf(pdf['id'], pages_to_read=15)
+                
+                if not pdf_text or len(pdf_text.strip()) < 50:
+                    status_callback(f"⚠️ Μη αναγνώσιμο PDF (Εικόνα;): {pdf['name']}", "warning")
+                    # Εδώ θα μπορούσαμε να το στείλουμε στα 'Unsorted'
+                    self._move_to_quarantine(pdf, "Unreadable_PDF")
+                    manual_review_count += 1
+                    continue
+
+                # B. AI Analysis
+                ai_result = self.ai.extract_metadata_from_text(pdf_text, pdf['name'])
+                
+                # C. Λήψη Απόφασης
+                if "MANUAL_REVIEW" in ai_result or "|" not in ai_result:
+                    self._move_to_quarantine(pdf, "_MANUAL_REVIEW")
+                    status_callback(f"⚠️ Άγνωστο αρχείο -> Καραντίνα: {pdf['name']}", "warning")
+                    manual_review_count += 1
+                    continue
+
+                parts = ai_result.split('|')
+                if len(parts) < 4:
+                    self._move_to_quarantine(pdf, "_AI_ERROR")
+                    continue
+
+                cat, brand, model, doc_type = [p.strip() for p in parts[:4]]
+
+                # D. Δημιουργία Ιεραρχίας 4 Επιπέδων
+                # 1. Category (π.χ. Boilers)
+                cat_id = self.drive.create_folder(cat, self.root_id)
+                if not cat_id: continue
+                
+                # 2. Brand (π.χ. Ariston)
+                brand_id = self.drive.create_folder(brand, cat_id)
+                if not brand_id: continue
+                
+                # 3. Model (π.χ. Clas One)
+                model_id = self.drive.create_folder(model, brand_id) or brand_id
+                
+                # 4. Doc Type (π.χ. Service Manuals)
+                type_id = self.drive.create_folder(doc_type, model_id) or model_id
+
+                # E. Μετακίνηση
+                if type_id not in pdf.get('parents', []):
+                    success = self.drive.move_file(pdf['id'], type_id)
+                    if success:
+                        status_callback(f"✅ {brand} {model} -> {doc_type}", "success")
+                        count += 1
+                    time.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Processing Error: {e}")
+                status_callback(f"❌ Σφάλμα στο αρχείο {pdf['name']}", "error")
+
+        status_callback(f"🏁 Τέλος! Τακτοποιήθηκαν: {count}, Καραντίνα: {manual_review_count}", "success")
+
+    def _move_to_quarantine(self, pdf_item, folder_name):
+        """Μετακινεί το αρχείο σε ειδικό φάκελο για έλεγχο από τον άνθρωπο."""
+        q_id = self.drive.create_folder(folder_name, self.root_id)
+        if q_id:
+            self.drive.move_file(pdf_item['id'], q_id)

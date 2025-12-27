@@ -1,8 +1,8 @@
 import streamlit as st
 from core.auth_manager import AuthManager
 from core.language_pack import get_text
-# ΠΡΟΣΘΗΚΗ: ui_search για τη Βιβλιοθήκη
-from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search
+# ΠΡΟΣΘΗΚΗ: ui_diagnostics στη λίστα imports
+from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search, ui_diagnostics
 
 st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
 
@@ -13,6 +13,7 @@ def init_session():
 def handle_logout():
     st.session_state.user_info = None
     st.session_state.messages = [] 
+    st.session_state.diag_plan = None # Καθαρισμός Wizard
     st.rerun()
 
 def main():
@@ -69,11 +70,12 @@ def main():
 
         st.divider()
         
-        # Menu (Πλήρες)
+        # Menu - ΠΡΟΣΘΗΚΗ ΤΟΥ ACTIVE DIAGNOSTICS
         opts = {
             get_text('menu_dashboard', new_lang): "dash",
+            "🔧 Active Diagnostics": "diag", # <--- ΝΕΑ ΕΠΙΛΟΓΗ
             get_text('menu_chat', new_lang): "chat",
-            get_text('menu_library', new_lang): "lib", # <--- Η Βιβλιοθήκη!
+            get_text('menu_library', new_lang): "lib",
             get_text('menu_clients', new_lang): "clients",
             get_text('menu_organizer', new_lang): "org",
             get_text('menu_tools', new_lang): "tools"
@@ -81,7 +83,7 @@ def main():
         if role == 'admin':
             opts[get_text('menu_admin', new_lang)] = "admin"
 
-        # Auto-Routing από Dashboard
+        # Auto-Routing
         default_idx = 0
         if 'app_mode' in st.session_state:
             try:
@@ -109,7 +111,8 @@ def main():
     # ROUTING
     if selection_code == "dash": ui_dashboard.render(user)
     elif selection_code == "chat": ui_chat.render(user)
-    elif selection_code == "lib": ui_search.render(user) # <--- Σύνδεση
+    elif selection_code == "diag": ui_diagnostics.render(user) # <--- ΣΥΝΔΕΣΗ ΝΕΟΥ UI
+    elif selection_code == "lib": ui_search.render(user)
     elif selection_code == "clients": ui_clients.render(user)
     elif selection_code == "org": ui_organizer.render(user)
     elif selection_code == "tools": ui_tools.render(user)
