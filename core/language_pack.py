@@ -7,56 +7,59 @@ Supports: Greek ('gr'), English ('en')
 
 TRANS = {
     # --- GENERAL UI ---
-    'app_title': {
-        'gr': "Mastro Nek AI | Platinum",
-        'en': "Mastro Nek AI | Platinum"
-    },
-    'welcome_msg': {
-        'gr': "Καλωσήρθες στο επαγγελματικό σύστημα υποστήριξης HVAC.",
-        'en': "Welcome to the professional HVAC support system."
-    },
-    'loading': {
-        'gr': "Φόρτωση...",
-        'en': "Loading..."
-    },
+    'app_title': {'gr': "Mastro Nek AI | Platinum", 'en': "Mastro Nek AI | Platinum"},
+    'welcome_msg': {'gr': "Καλωσήρθες", 'en': "Welcome"},
+    'loading': {'gr': "Φόρτωση...", 'en': "Loading..."},
     
     # --- SIDEBAR MENU ---
     'menu_header': {'gr': "Πλοήγηση", 'en': "Navigation"},
-    'menu_chat': {'gr': "💬 Συνομιλία (AI)", 'en': "💬 Chat (AI)"},
+    'lang_select': {'gr': "Γλώσσα / Language", 'en': "Language / Γλώσσα"},
+    'menu_dashboard': {'gr': "📊 Επισκόπηση (Dashboard)", 'en': "📊 Dashboard"},
+    'menu_chat': {'gr': "💬 AI Συνομιλία", 'en': "💬 AI Chat"},
     'menu_library': {'gr': "🔎 Βιβλιοθήκη Manuals", 'en': "🔎 Manuals Library"},
-    'menu_organizer': {'gr': "🧠 AI Organizer", 'en': "🧠 AI Organizer"},
+    'menu_organizer': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
     'menu_clients': {'gr': "📇 Πελατολόγιο", 'en': "📇 Client CRM"},
-    'menu_tools': {'gr': "🧮 Εργαλεία", 'en': "🧮 Tools"},
-    'menu_help': {'gr': "❓ Βοήθεια Χρήστη", 'en': "❓ User Help"},
-    'menu_admin': {'gr': "⚙️ Admin Panel", 'en': "⚙️ Admin Panel"},
-    'menu_specs': {'gr': "🧬 Τεχνική Ανάλυση", 'en': "🧬 System Specs"},
+    'menu_tools': {'gr': "🛠️ Εργαλεία", 'en': "🛠️ Tools"},
+    'menu_admin': {'gr': "⚙️ Διαχείριση (Admin)", 'en': "⚙️ Admin Panel"},
     'logout': {'gr': "🚪 Αποσύνδεση", 'en': "🚪 Logout"},
 
-    # --- LOGIN SCREEN ---
-    'login_prompt': {'gr': "Σύνδεση στο Σύστημα", 'en': "System Login"},
-    'email_lbl': {'gr': "Email Χρήστη", 'en': "User Email"},
-    'pass_lbl': {'gr': "Κωδικός Πρόσβασης", 'en': "Password"},
-    'btn_login': {'gr': "Είσοδος", 'en': "Login"},
-    'btn_register': {'gr': "Εγγραφή Νέου", 'en': "Register New"},
-    'error_auth': {'gr': "❌ Λάθος στοιχεία ή μη ενεργός λογαριασμός.", 'en': "❌ Invalid credentials or inactive account."},
-    'pending_auth': {'gr': "⏳ Ο λογαριασμός σας αναμένει έγκριση.", 'en': "⏳ Account pending approval."},
-    
-    # --- ORGANIZER ---
-    'org_title': {'gr': "Έξυπνη Ταξινόμηση Εγγράφων", 'en': "Smart Document Sorting"},
-    'org_start': {'gr': "🚀 Έναρξη AI Ανάλυσης", 'en': "🚀 Start AI Analysis"},
-    'org_scan': {'gr': "Σάρωση φακέλου...", 'en': "Scanning directory..."},
-    'org_success': {'gr': "Η ταξινόμηση ολοκληρώθηκε.", 'en': "Sorting completed."},
+    # --- DASHBOARD ---
+    'dash_quick': {'gr': "🚀 Γρήγορες Ενέργειες", 'en': "🚀 Quick Actions"},
+    'dash_chat_card': {'gr': "AI Τεχνικός Βοηθός", 'en': "AI Technical Assistant"},
+    'dash_chat_desc': {'gr': "Διάγνωση βλαβών & Λύσεις", 'en': "Diagnosis & Solutions"},
+    'dash_btn_chat': {'gr': "💬 Έναρξη Συνομιλίας", 'en': "💬 Start Chat"},
+    'dash_lib_card': {'gr': "Βιβλιοθήκη Manuals", 'en': "Manuals Library"},
+    'dash_lib_desc': {'gr': "Αναζήτηση Εγχειριδίων", 'en': "Search Manuals"},
+    'dash_btn_lib': {'gr': "🔎 Αναζήτηση", 'en': "🔎 Search"},
+    'dash_tool_card': {'gr': "Εργαλεία HVAC", 'en': "HVAC Tools"},
+    'dash_tool_desc': {'gr': "BTU Calc & Μετατροπές", 'en': "BTU Calc & Converters"},
+    'dash_btn_tool': {'gr': "🛠️ Άνοιγμα", 'en': "🛠️ Open"},
 
-    # --- HELP ---
-    'help_title': {'gr': "Οδηγός Χρήσης", 'en': "User Manual"},
+    # --- CHAT ---
+    'chat_new_btn': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
+    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", 'en': "Describe the issue or error code..."},
+    'chat_thinking': {'gr': "🤔 Ο Mastro Nek αναλύει...", 'en': "🤔 Mastro Nek is thinking..."},
     
-    # --- TECH SPECS ---
-    'specs_title': {'gr': "Τεχνικές Προδιαγραφές Συστήματος", 'en': "System Technical Specifications"}
+    # --- TOOLS ---
+    'tool_btu_title': {'gr': "Υπολογισμός Ψυκτικών Φορτίων", 'en': "Cooling Load Calculator"},
+    'tool_area': {'gr': "Τετραγωνικά Μέτρα (m²)", 'en': "Area (m²)"},
+    'tool_height': {'gr': "Ύψος Χώρου (m)", 'en': "Height (m)"},
+    'tool_insulation': {'gr': "Μόνωση", 'en': "Insulation"},
+    'tool_sun': {'gr': "Προσανατολισμός", 'en': "Sun Exposure"},
+    'tool_result': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Power"},
+    
+    # --- LOGIN ---
+    'login_tab': {'gr': "Είσοδος", 'en': "Login"},
+    'register_tab': {'gr': "Νέα Εγγραφή", 'en': "Register"},
+    'email_lbl': {'gr': "Email", 'en': "Email"},
+    'pass_lbl': {'gr': "Κωδικός", 'en': "Password"},
+    'name_lbl': {'gr': "Ονοματεπώνυμο", 'en': "Full Name"},
+    'btn_login': {'gr': "Είσοδος", 'en': "Login"},
+    'btn_register': {'gr': "Εγγραφή", 'en': "Register"},
+    'login_success': {'gr': "Επιτυχής Είσοδος!", 'en': "Login Successful!"},
+    'reg_success': {'gr': "Η εγγραφή ολοκληρώθηκε! Αναμείνατε έγκριση.", 'en': "Registration complete! Await approval."}
 }
 
 def get_text(key: str, lang: str = 'gr') -> str:
     """Safely retrieves text based on language code."""
-    try:
-        return TRANS.get(key, {}).get(lang, f"[{key}]")
-    except Exception:
-        return f"ERR:{key}"
+    return TRANS.get(key, {}).get(lang, f"[{key}]")
