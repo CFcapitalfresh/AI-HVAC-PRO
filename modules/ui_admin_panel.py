@@ -1,25 +1,27 @@
 import streamlit as st
 from core.db_connector import DatabaseConnector
+from core.language_pack import get_text
 import pandas as pd
 
 def render(user):
-    st.title("⚙️ Κέντρο Διαχείρισης (Admin Panel)")
+    lang = st.session_state.get('lang', 'gr')
+    st.title(get_text('admin_title', lang))
     
     # Φόρτωση Χρηστών
     users = DatabaseConnector.fetch_data("Users")
     if users.empty:
-        st.warning("Δεν βρέθηκαν χρήστες.")
+        st.warning(get_text('admin_no_users', lang))
         return
 
     # --- 1. ΑΙΤΗΜΑΤΑ ΓΙΑ ΕΓΚΡΙΣΗ ---
-    st.subheader("🔔 Εκκρεμή Αιτήματα (Pending)")
+    st.subheader(get_text('admin_pending', lang))
     
     # Βρίσκουμε ποιοι είναι 'pending'
     pending_mask = users['role'] == 'pending'
     pending_users = users[pending_mask]
 
     if pending_users.empty:
-        st.success("✅ Όλα ήσυχα! Κανένα νέο αίτημα.")
+        st.success(get_text('admin_no_pending', lang))
     else:
         for index, row in pending_users.iterrows():
             with st.container(border=True):
@@ -28,27 +30,24 @@ def render(user):
                 c1.caption(f"📧 {row['email']} | 📅 {row['created_at']}")
                 
                 # Κουμπί Ενεργοποίησης
-                if c2.button("✅ Ενεργοποίηση", key=f"act_{index}", use_container_width=True):
-                    # Αλλαγή στο τοπικό dataframe
+                if c2.button(get_text('admin_btn_activate', lang), key=f"act_{index}", use_container_width=True):
                     users.at[index, 'role'] = 'active'
-                    # Αποθήκευση στο Excel
                     if DatabaseConnector.update_all_data("Users", users):
-                        st.success(f"Ο χρήστης {row['name']} ενεργοποιήθηκε!")
+                        st.success(f"{get_text('admin_msg_active', lang)} ({row['name']})")
                         st.rerun()
                     else:
-                        st.error("Σφάλμα αποθήκευσης.")
+                        st.error("Error Saving.")
 
                 # Κουμπί Διαγραφής
-                if c3.button("🗑️ Διαγραφή", key=f"del_{index}", use_container_width=True):
-                    # Διαγραφή γραμμής
+                if c3.button(get_text('admin_btn_delete', lang), key=f"del_{index}", use_container_width=True):
                     users = users.drop(index)
                     if DatabaseConnector.update_all_data("Users", users):
-                        st.warning("Το αίτημα διαγράφηκε.")
+                        st.warning(get_text('admin_msg_del', lang))
                         st.rerun()
 
     st.divider()
 
     # --- 2. ΟΛΟΙ ΟΙ ΧΡΗΣΤΕΣ ---
-    with st.expander("👥 Προβολή Όλων των Χρηστών"):
+    with st.expander(get_text('admin_all_users', lang)):
         st.dataframe(users)
-        st.caption("Εδώ βλέπετε όλους τους εγγεγραμμένους χρήστες.")
+        st.caption(get_text('admin_all_users_cap', lang))

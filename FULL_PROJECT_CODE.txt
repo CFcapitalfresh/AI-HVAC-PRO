@@ -164,142 +164,106 @@ st.write("Η διάγνωση ολοκληρώθηκε.")
 import streamlit as st
 from core.auth_manager import AuthManager
 from core.language_pack import get_text
-# Modules Import
 from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools
 
-# --- 1. ΡΥΘΜΙΣΗ ΣΕΛΙΔΑΣ ---
-st.set_page_config(
-    page_title="Mastro Nek AI",
-    page_icon="🤖", 
-    layout="wide"
-)
+st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
 
-# --- 2. SESSION SETUP ---
 def init_session():
-    if 'user_info' not in st.session_state:
-        st.session_state.user_info = None
-    if 'lang' not in st.session_state:
-        st.session_state.lang = 'gr' # Default Ελληνικά
+    if 'user_info' not in st.session_state: st.session_state.user_info = None
+    if 'lang' not in st.session_state: st.session_state.lang = 'gr'
 
 def handle_logout():
     st.session_state.user_info = None
     st.session_state.messages = [] 
     st.rerun()
 
-# --- 3. MAIN APPLICATION ---
 def main():
     init_session()
-    
-    # Γλώσσα (Τρέχουσα)
     lang = st.session_state.lang
 
-    # --- A. LOGIN SCREEN ---
+    # --- LOGIN SCREEN ---
     if not st.session_state.user_info:
         st.header(f"🔐 {get_text('app_title', lang)}")
         
-        # Επιλογή Γλώσσας στο Login
         c_lang, _ = st.columns([1,5])
         with c_lang:
-            sel_lang = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1)
-            st.session_state.lang = 'gr' if sel_lang == "Ελληνικά" else 'en'
-            if st.session_state.lang != lang: st.rerun() # Refresh αν αλλάξει
+            sel = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1)
+            st.session_state.lang = 'gr' if sel == "Ελληνικά" else 'en'
+            if st.session_state.lang != lang: st.rerun()
 
-        tab_login, tab_register = st.tabs([get_text('login_tab', lang), get_text('register_tab', lang)])
+        t1, t2 = st.tabs([get_text('login_tab', lang), get_text('register_tab', lang)])
         
-        with tab_login:
-            with st.form("login_form"):
+        with t1:
+            with st.form("login"):
                 email = st.text_input(get_text('email_lbl', lang))
-                password = st.text_input(get_text('pass_lbl', lang), type="password")
-                submit = st.form_submit_button(get_text('btn_login', lang), use_container_width=True)
-                if submit:
-                    user, msg = AuthManager.verify_login(email, password)
+                pwd = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_login', lang), use_container_width=True):
+                    user, msg = AuthManager.verify_login(email, pwd)
                     if user:
                         st.session_state.user_info = user
-                        st.success(get_text('login_success', lang))
                         st.rerun()
-                    else:
-                        st.error(f"❌ {msg}")
-
-        with tab_register:
-            with st.form("register_form"):
-                new_email = st.text_input(get_text('email_lbl', lang))
-                new_name = st.text_input(get_text('name_lbl', lang))
-                new_pass = st.text_input(get_text('pass_lbl', lang), type="password")
-                reg_submit = st.form_submit_button(get_text('btn_register', lang), use_container_width=True)
-                if reg_submit:
-                    if AuthManager.register_new_user(new_email, new_name, new_pass):
-                        st.success(get_text('reg_success', lang))
-                    else:
-                        st.error("Error / Σφάλμα")
+                    else: st.error(msg)
+        with t2:
+            with st.form("reg"):
+                ne = st.text_input(get_text('email_lbl', lang))
+                nn = st.text_input(get_text('name_lbl', lang))
+                np = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_register', lang), use_container_width=True):
+                    if AuthManager.register_new_user(ne, nn, np): st.success(get_text('reg_success', lang))
+                    else: st.error("Error")
         return 
 
-    # --- B. MAIN APP ---
+    # --- MAIN APP ---
     user = st.session_state.user_info
     role = user.get('role', 'active')
 
     # SIDEBAR
     with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=80)
         st.write(f"👤 **{user['name']}**")
         st.caption(f"Role: {role.upper()}")
-        
         st.divider()
         
-        # Επιλογέας Γλώσσας (Μέσα στην εφαρμογή)
-        lang_choice = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
-        new_lang = 'gr' if lang_choice == "Ελληνικά" else 'en'
-        if new_lang != st.session_state.lang:
+        # Γλώσσα
+        l_sel = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
+        new_lang = 'gr' if l_sel == "Ελληνικά" else 'en'
+        if new_lang != lang:
             st.session_state.lang = new_lang
             st.rerun()
 
         st.divider()
         
-        # Δυναμικό Μενού (Φέρνει τις λέξεις από το Λεξικό)
-        opt_dash = get_text('menu_dashboard', new_lang)
-        opt_chat = get_text('menu_chat', new_lang)
-        opt_client = get_text('menu_clients', new_lang)
-        opt_org = get_text('menu_organizer', new_lang)
-        opt_tools = get_text('menu_tools', new_lang)
-        opt_admin = get_text('menu_admin', new_lang)
-
-        options = [opt_dash, opt_chat, opt_client, opt_org, opt_tools]
-        
+        # Menu
+        opts = {
+            get_text('menu_dashboard', new_lang): "dash",
+            get_text('menu_chat', new_lang): "chat",
+            get_text('menu_clients', new_lang): "clients",
+            get_text('menu_organizer', new_lang): "org",
+            get_text('menu_tools', new_lang): "tools"
+        }
         if role == 'admin':
-            options.append(opt_admin)
-            
-        selection = st.radio(get_text('menu_header', new_lang), options)
+            opts[get_text('menu_admin', new_lang)] = "admin"
+
+        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()))
+        selection_code = opts[selection_label]
         
         st.divider()
+        
+        # ΚΟΥΜΠΙ ΝΕΑ ΣΥΝΟΜΙΛΙΑ (ΣΤΟ SIDEBAR)
+        if selection_code == "chat":
+            if st.button(f"➕ {get_text('new_chat_side', new_lang)}", type="primary", use_container_width=True):
+                st.session_state.messages = []
+                st.rerun()
+        
         if st.button(get_text('logout', new_lang)):
             handle_logout()
 
-    # ROUTING (Σύνδεση επιλογής με αρχεία)
-    if selection == opt_dash:
-        try: ui_dashboard.render(user)
-        except: st.info("Dashboard loading...")
-
-    elif selection == opt_chat:
-        try: ui_chat.render(user)
-        except Exception as e: st.error(f"Chat Error: {e}")
-
-    elif selection == opt_client:
-        try: ui_clients.render(user)
-        except: st.info("Clients loading...")
-
-    elif selection == opt_org:
-        try: ui_organizer.render(user)
-        except: st.info("Organizer loading...")
-
-    elif selection == opt_tools:
-        try: ui_tools.render(user)
-        except: st.info("Tools loading...")
-
-    elif selection == opt_admin:
-        if role == 'admin':
-            try: ui_admin_panel.render(user)
-            except Exception as e: st.error(f"Admin Error: {e}")
-        else:
-            st.error("⛔ Access Denied")
+    # ROUTING
+    if selection_code == "dash": ui_dashboard.render(user)
+    elif selection_code == "chat": ui_chat.render(user)
+    elif selection_code == "clients": ui_clients.render(user)
+    elif selection_code == "org": ui_organizer.render(user)
+    elif selection_code == "tools": ui_tools.render(user)
+    elif selection_code == "admin": ui_admin_panel.render(user)
 
 if __name__ == "__main__":
     main()
@@ -716,60 +680,69 @@ Supports: Greek ('gr'), English ('en')
 TRANS = {
     # --- GENERAL UI ---
     'app_title': {'gr': "Mastro Nek AI | Platinum", 'en': "Mastro Nek AI | Platinum"},
-    'welcome_msg': {'gr': "Καλωσήρθες", 'en': "Welcome"},
-    'loading': {'gr': "Φόρτωση...", 'en': "Loading..."},
-    
-    # --- SIDEBAR MENU ---
     'menu_header': {'gr': "Πλοήγηση", 'en': "Navigation"},
-    'lang_select': {'gr': "Γλώσσα / Language", 'en': "Language / Γλώσσα"},
-    'menu_dashboard': {'gr': "📊 Επισκόπηση (Dashboard)", 'en': "📊 Dashboard"},
+    'menu_dashboard': {'gr': "📊 Επισκόπηση", 'en': "📊 Dashboard"},
     'menu_chat': {'gr': "💬 AI Συνομιλία", 'en': "💬 AI Chat"},
     'menu_library': {'gr': "🔎 Βιβλιοθήκη Manuals", 'en': "🔎 Manuals Library"},
     'menu_organizer': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
     'menu_clients': {'gr': "📇 Πελατολόγιο", 'en': "📇 Client CRM"},
     'menu_tools': {'gr': "🛠️ Εργαλεία", 'en': "🛠️ Tools"},
-    'menu_admin': {'gr': "⚙️ Διαχείριση (Admin)", 'en': "⚙️ Admin Panel"},
+    'menu_admin': {'gr': "⚙️ Διαχείριση", 'en': "⚙️ Admin Panel"},
     'logout': {'gr': "🚪 Αποσύνδεση", 'en': "🚪 Logout"},
-
-    # --- DASHBOARD ---
-    'dash_quick': {'gr': "🚀 Γρήγορες Ενέργειες", 'en': "🚀 Quick Actions"},
-    'dash_chat_card': {'gr': "AI Τεχνικός Βοηθός", 'en': "AI Technical Assistant"},
-    'dash_chat_desc': {'gr': "Διάγνωση βλαβών & Λύσεις", 'en': "Diagnosis & Solutions"},
-    'dash_btn_chat': {'gr': "💬 Έναρξη Συνομιλίας", 'en': "💬 Start Chat"},
-    'dash_lib_card': {'gr': "Βιβλιοθήκη Manuals", 'en': "Manuals Library"},
-    'dash_lib_desc': {'gr': "Αναζήτηση Εγχειριδίων", 'en': "Search Manuals"},
-    'dash_btn_lib': {'gr': "🔎 Αναζήτηση", 'en': "🔎 Search"},
-    'dash_tool_card': {'gr': "Εργαλεία HVAC", 'en': "HVAC Tools"},
-    'dash_tool_desc': {'gr': "BTU Calc & Μετατροπές", 'en': "BTU Calc & Converters"},
-    'dash_btn_tool': {'gr': "🛠️ Άνοιγμα", 'en': "🛠️ Open"},
+    'new_chat_side': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
 
     # --- CHAT ---
-    'chat_new_btn': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
-    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", 'en': "Describe the issue or error code..."},
+    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα...", 'en': "Describe the issue..."},
     'chat_thinking': {'gr': "🤔 Ο Mastro Nek αναλύει...", 'en': "🤔 Mastro Nek is thinking..."},
-    
-    # --- TOOLS ---
-    'tool_btu_title': {'gr': "Υπολογισμός Ψυκτικών Φορτίων", 'en': "Cooling Load Calculator"},
-    'tool_area': {'gr': "Τετραγωνικά Μέτρα (m²)", 'en': "Area (m²)"},
-    'tool_height': {'gr': "Ύψος Χώρου (m)", 'en': "Height (m)"},
+    'chat_intro': {'gr': "👋 Γεια σου! Ρώτησέ με για βλάβες ή manuals.", 'en': "👋 Hello! Ask me about faults or manuals."},
+
+    # --- TOOLS (BTU) ---
+    'tool_btu_tab': {'gr': "❄️ BTU Calculator", 'en': "❄️ BTU Calculator"},
+    'tool_conv_tab': {'gr': "📏 Μετατροπέας", 'en': "📏 Converter"},
+    'tool_pipe_tab': {'gr': "🔥 Σωληνώσεις", 'en': "🔥 Piping Guide"},
+    'tool_area': {'gr': "Τετραγωνικά (m²)", 'en': "Area (m²)"},
+    'tool_height': {'gr': "Ύψος Χώρου (m)", 'en': "Ceiling Height (m)"},
     'tool_insulation': {'gr': "Μόνωση", 'en': "Insulation"},
     'tool_sun': {'gr': "Προσανατολισμός", 'en': "Sun Exposure"},
-    'tool_result': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Power"},
+    'tool_calc_res': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Capacity"},
+    'tool_rec': {'gr': "Προτεινόμενο", 'en': "Recommended"},
+
+    # Επιλογές Dropdown (BTU)
+    'ins_good': {'gr': "Καλή (Νέα Κουφώματα)", 'en': "Good (New Frames)"},
+    'ins_avg': {'gr': "Μέτρια (Διπλά Τζάμια 10ετ.)", 'en': "Average (Double Glazed)"},
+    'ins_bad': {'gr': "Κακή (Μονά/Αμόνωτο)", 'en': "Poor (Single Glazed)"},
+    'sun_low': {'gr': "Σκιερό / Βόρειο", 'en': "Shady / North"},
+    'sun_med': {'gr': "Μέτρια Ηλιοφάνεια", 'en': "Medium Sun"},
+    'sun_high': {'gr': "Πολύ Ήλιος / Ρετιρέ", 'en': "High Sun / Roof"},
+
+    # --- TOOLS (PIPING) ---
+    'pipe_liquid': {'gr': "Υγρού (Liquid)", 'en': "Liquid Line"},
+    'pipe_gas': {'gr': "Αερίου (Gas)", 'en': "Gas Line"},
+
+    # --- ORGANIZER ---
+    'org_title': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
+    'org_desc': {'gr': "🤖 **AI Auto-Sorter**<br>Σαρώνει και ταξινομεί αρχεία.", 'en': "🤖 **AI Auto-Sorter**<br>Scans and sorts files automatically."},
+    'org_start': {'gr': "Έναρξη Ταξινόμησης", 'en': "Start Sorting"},
+    'org_log': {'gr': "📜 Καταγραφή (Live Log)", 'en': "📜 Live Log"},
+
+    # --- CLIENTS ---
+    'client_search': {'gr': "🔍 Αναζήτηση Πελάτη...", 'en': "🔍 Search Client..."},
+    'client_found': {'gr': "Βρέθηκαν", 'en': "Found"},
+    'client_empty': {'gr': "Η λίστα είναι κενή.", 'en': "Client list is empty."},
     
     # --- LOGIN ---
     'login_tab': {'gr': "Είσοδος", 'en': "Login"},
-    'register_tab': {'gr': "Νέα Εγγραφή", 'en': "Register"},
+    'register_tab': {'gr': "Εγγραφή", 'en': "Register"},
     'email_lbl': {'gr': "Email", 'en': "Email"},
     'pass_lbl': {'gr': "Κωδικός", 'en': "Password"},
-    'name_lbl': {'gr': "Ονοματεπώνυμο", 'en': "Full Name"},
+    'name_lbl': {'gr': "Όνομα", 'en': "Name"},
     'btn_login': {'gr': "Είσοδος", 'en': "Login"},
     'btn_register': {'gr': "Εγγραφή", 'en': "Register"},
     'login_success': {'gr': "Επιτυχής Είσοδος!", 'en': "Login Successful!"},
-    'reg_success': {'gr': "Η εγγραφή ολοκληρώθηκε! Αναμείνατε έγκριση.", 'en': "Registration complete! Await approval."}
+    'reg_success': {'gr': "Η εγγραφή ολοκληρώθηκε!", 'en': "Registration complete!"}
 }
 
 def get_text(key: str, lang: str = 'gr') -> str:
-    """Safely retrieves text based on language code."""
     return TRANS.get(key, {}).get(lang, f"[{key}]")
 
 ==================================================
@@ -1234,39 +1207,26 @@ class AIEngine:
 import streamlit as st
 from core.language_pack import get_text
 from core.ai_engine import AIEngine
-from services.sync_service import SyncService
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
 
-    # --- 1. HEADER & NEW CHAT BUTTON ---
-    # Χρησιμοποιούμε κολώνες για να βάλουμε το κουμπί δίπλα στον τίτλο
-    col_head, col_btn = st.columns([3, 1])
-    
-    with col_head:
-        st.header(f"{get_text('menu_chat', lang)}")
-    
-    with col_btn:
-        # Το κουμπί ΝΕΑ ΣΥΝΟΜΙΛΙΑ ψηλά και καθαρά
-        if st.button(f"➕ {get_text('chat_new_btn', lang)}", type="primary", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.current_context_files = [] 
-            st.rerun()
+    st.header(f"{get_text('menu_chat', lang)}")
 
-    # --- 2. INIT ENGINE & LIBRARY ---
+    # Αρχικοποίηση Μηχανής (Χωρίς σκανάρισμα Drive!)
     brain = AIEngine()
     
-    if 'library_cache' not in st.session_state or not st.session_state.library_cache:
-        try:
-            syncer = SyncService()
-            st.session_state.library_cache = syncer.scan_library()
-        except:
-            st.session_state.library_cache = []
+    # Αν δεν υπάρχει λίστα, βάζουμε κενή για να μην κολλάει
+    if 'library_cache' not in st.session_state:
+        st.session_state.library_cache = []
 
     if "messages" not in st.session_state: 
         st.session_state.messages = []
     
-    # --- 3. DISPLAY HISTORY ---
+    # Εμφάνιση Ιστορικού
+    if not st.session_state.messages:
+        st.info(get_text('chat_intro', lang))
+
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -1274,20 +1234,17 @@ def render(user):
                 with st.expander("📚 Sources"):
                     for src in msg["sources"]:
                         link = src.get('link', '')
-                        if link:
-                            st.markdown(f"📄 **[{src['name']}]({link})**")
-                        else:
-                            st.markdown(f"📄 **{src['name']}**")
+                        if link: st.markdown(f"📄 **[{src['name']}]({link})**")
+                        else: st.markdown(f"📄 **{src['name']}**")
 
-    # --- 4. INPUT AREA ---
+    # INPUT AREA (Τώρα θα εμφανίζεται αμέσως)
     prompt = st.chat_input(get_text('chat_placeholder', lang))
     
     if prompt:
-        # A. User Msg
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
-        # B. Context Search
+        # Γρήγορη αναζήτηση στη μνήμη (αν υπάρχει κάτι)
         found_files = []
         keywords = prompt.lower().split()
         library = st.session_state.library_cache
@@ -1300,7 +1257,6 @@ def render(user):
         relevant_files = found_files[:3]
         file_names_str = ", ".join([f['name'] for f in relevant_files])
 
-        # C. AI Response
         with st.chat_message("assistant"):
             with st.spinner(get_text('chat_thinking', lang)):
                 response_text = brain.get_chat_response(
@@ -1314,12 +1270,9 @@ def render(user):
                     with st.expander("📚 Context Files"):
                         for f in relevant_files:
                             link = f.get('link', '')
-                            if link:
-                                st.markdown(f"📄 **[{f['name']}]({link})**")
-                            else:
-                                st.markdown(f"📄 **{f['name']}**")
+                            if link: st.markdown(f"📄 **[{f['name']}]({link})**")
+                            else: st.markdown(f"📄 **{f['name']}**")
 
-        # D. Save
         st.session_state.messages.append({
             "role": "assistant", 
             "content": response_text,
@@ -1334,21 +1287,20 @@ from services.sorter_logic import SorterService
 from core.language_pack import get_text
 
 def render(user):
-    st.header(get_text('menu_organizer', st.session_state.lang))
+    lang = st.session_state.get('lang', 'gr')
+    st.header(get_text('menu_organizer', lang))
     
-    st.markdown("""
+    st.markdown(f"""
     <div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #ff4b4b;'>
-        <strong>🤖 AI Auto-Sorter</strong><br>
-        Σαρώνει φακέλους, διαβάζει PDF και ταξινομεί σε: 
-        Category > Brand > Model > Type
+        {get_text('org_desc', lang)}
     </div>
     """, unsafe_allow_html=True)
     st.write("")
 
-    if st.button(f"🚀 {get_text('org_start', st.session_state.lang)}", type="primary", use_container_width=True):
+    if st.button(f"🚀 {get_text('org_start', lang)}", type="primary", use_container_width=True):
         sorter = SorterService()
         st.divider()
-        st.subheader("📜 Live Log")
+        st.subheader(get_text('org_log', lang))
         
         log_box = st.container(height=300, border=True)
         def update_ui(msg, type_):
@@ -1542,77 +1494,66 @@ import streamlit as st
 from core.language_pack import get_text
 
 def render(user):
-    st.header(get_text('menu_tools', st.session_state.lang))
+    lang = st.session_state.get('lang', 'gr')
+    st.header(get_text('menu_tools', lang))
     
-    # CSS για μεγάλα κουμπιά (Touch friendly)
-    st.markdown("""
-    <style>
-    div.stButton > button:first-child {
-        height: 3em;
-        font-size: 18px;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown("""<style>div.stButton > button:first-child {height: 3em; font-size: 18px; font-weight: bold;}</style>""", unsafe_allow_html=True)
 
-    # Οι 3 Καρτέλες
-    tab1, tab2, tab3 = st.tabs(["❄️ BTU Calc", "📏 Μετατροπέας", "🔥 Σωληνώσεις"])
+    tab1, tab2, tab3 = st.tabs([get_text('tool_btu_tab', lang), get_text('tool_conv_tab', lang), get_text('tool_pipe_tab', lang)])
     
-    # --- 1. ΥΠΟΛΟΓΙΣΜΟΣ BTU ---
+    # --- BTU CALC ---
     with tab1:
-        st.subheader("Υπολογισμός Ψυκτικών Φορτίων")
-        
         c1, c2 = st.columns(2)
         with c1:
-            area = st.number_input("Τετραγωνικά Μέτρα (m²)", min_value=5, value=25, step=1)
-            height = st.number_input("Ύψος Χώρου (m)", min_value=2.0, value=2.8, step=0.1)
+            area = st.number_input(get_text('tool_area', lang), min_value=5, value=25)
+            height = st.number_input(get_text('tool_height', lang), min_value=2.0, value=2.8, step=0.1)
         
         with c2:
-            insulation = st.selectbox("Μόνωση", ["Καλή (Νέα Κουφώματα)", "Μέτρια (Διπλά Τζάμια 10ετίας)", "Κακή (Μονά Τζάμια/Αμόνωτο)"])
-            sun = st.selectbox("Προσανατολισμός", ["Σκιερό / Βόρειο", "Μέτρια Ηλιοφάνεια", "Πολύ Ήλιος / Ρετιρέ"])
+            # Δημιουργούμε λίστες επιλογών που αντιστοιχούν στις μεταφράσεις
+            ins_opts = [get_text('ins_good', lang), get_text('ins_avg', lang), get_text('ins_bad', lang)]
+            sun_opts = [get_text('sun_low', lang), get_text('sun_med', lang), get_text('sun_high', lang)]
             
-        # Λογική Υπολογισμού
+            insulation = st.selectbox(get_text('tool_insulation', lang), ins_opts)
+            sun = st.selectbox(get_text('tool_sun', lang), sun_opts)
+            
+        # Logic (Βασίζεται στο index για να δουλεύει ανεξαρτήτως γλώσσας)
+        # Index 0: Good/Low, 1: Avg/Med, 2: Bad/High
+        ins_idx = ins_opts.index(insulation)
+        sun_idx = sun_opts.index(sun)
+
         base_factor = 400
-        if insulation == "Καλή (Νέα Κουφώματα)": base_factor = 350
-        elif insulation == "Μέτρια (Διπλά Τζάμια 10ετίας)": base_factor = 450
-        elif insulation == "Κακή (Μονά Τζάμια/Αμόνωτο)": base_factor = 600
+        if ins_idx == 0: base_factor = 350
+        elif ins_idx == 1: base_factor = 450
+        elif ins_idx == 2: base_factor = 600
         
-        if sun == "Πολύ Ήλιος / Ρετιρέ": base_factor += 100
-        elif sun == "Σκιερό / Βόρειο": base_factor -= 50
+        if sun_idx == 2: base_factor += 100
+        elif sun_idx == 0: base_factor -= 50
         
-        final_factor = base_factor
-        if height > 3.0: final_factor *= (height / 3.0)
-        
+        final_factor = base_factor * (height / 3.0) if height > 3.0 else base_factor
         btu_result = int(area * final_factor)
         kw_result = round(btu_result / 3412, 2)
         
         st.divider()
-        st.success(f"📊 Απαιτούμενη Ισχύς: **{btu_result:,} BTU/h** ({kw_result} kW)")
+        st.success(f"📊 {get_text('tool_calc_res', lang)}: **{btu_result:,} BTU/h** ({kw_result} kW)")
         
-        # Πρόταση
-        rec = "9άρι" if btu_result < 9000 else "12άρι" if btu_result < 13000 else "18άρι" if btu_result < 19000 else "24άρι" if btu_result < 25000 else "24άρι+ / Multi"
-        st.info(f"💡 Προτεινόμενο: **{rec}**")
+        rec = "9000" if btu_result < 9000 else "12000" if btu_result < 13000 else "18000" if btu_result < 19000 else "24000"
+        st.info(f"💡 {get_text('tool_rec', lang)}: **{rec} BTU**")
 
-    # --- 2. ΜΕΤΑΤΡΟΠΕΑΣ ---
+    # --- CONVERTER ---
     with tab2:
-        st.subheader("Μετατροπέας Μονάδων")
-        type_ = st.radio("Επιλογή", ["Πίεση (Bar/PSI)", "Θερμοκρασία (C/F)", "Ισχύς (kW/BTU)"], horizontal=True)
-        val = st.number_input("Τιμή", value=1.0)
-        
-        if "Πίεση" in type_:
-            st.write(f"➡️ **{round(val * 14.5038, 2)} PSI**")
-        elif "Θερμοκρασία" in type_:
-            st.write(f"➡️ **{round((val * 9/5) + 32, 1)} °F**")
-        elif "Ισχύς" in type_:
-            st.write(f"➡️ **{int(val * 3412)} BTU/h**")
+        val = st.number_input("Value", value=1.0)
+        c_type = st.radio("Type", ["Bar -> PSI", "C -> F", "kW -> BTU"])
+        if c_type == "Bar -> PSI": st.write(f"➡️ **{round(val * 14.5038, 2)} PSI**")
+        elif c_type == "C -> F": st.write(f"➡️ **{round((val * 9/5) + 32, 1)} °F**")
+        elif c_type == "kW -> BTU": st.write(f"➡️ **{int(val * 3412)} BTU/h**")
 
-    # --- 3. ΣΩΛΗΝΩΣΕΙΣ ---
+    # --- PIPING ---
     with tab3:
-        st.subheader("Οδηγός Διαμέτρων (R32/R410a)")
+        st.subheader("R32/R410a Guide")
         data = {
             "BTU": ["9.000", "12.000", "18.000", "24.000"],
-            "Υγρού (Liquid)": ["1/4''", "1/4''", "1/4''", "3/8''"],
-            "Αερίου (Gas)": ["3/8''", "1/2''", "1/2''", "5/8''"]
+            get_text('pipe_liquid', lang): ["1/4''", "1/4''", "1/4''", "3/8''"],
+            get_text('pipe_gas', lang): ["3/8''", "1/2''", "1/2''", "5/8''"]
         }
         st.table(data)
 
