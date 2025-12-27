@@ -4,14 +4,15 @@ from core.ai_engine import AIEngine
 from services.sync_service import SyncService
 
 def render(user):
-    # --- 1. HEADER ---
-    # Πρόσθεσα το "v2.0" για να επιβεβαιώσουμε ότι πήρε το νέο αρχείο
-    st.header(f"{get_text('menu_chat', st.session_state.lang)} v2.0")
+    # --- 1. HEADER (Τίτλος) ---
+    # Βεβαιώσου ότι βλέπεις αυτόν τον τίτλο και ΟΧΙ τον AI Auto-Sorter
+    st.header(f"{get_text('menu_chat', st.session_state.lang)} v3.0")
 
     # --- 2. SIDEBAR CONTROLS ---
     with st.sidebar:
         st.divider()
         st.markdown("### 🛠️ Εργαλεία")
+        # Κουμπί Reset
         if st.button("🧹 Νέο Πρόβλημα / Reset", use_container_width=True):
             st.session_state.messages = []
             st.session_state.current_context_files = [] 
@@ -20,7 +21,7 @@ def render(user):
     # --- 3. INIT ENGINE ---
     brain = AIEngine()
     
-    # Φόρτωση βιβλιοθήκης (Ασφαλής έλεγχος)
+    # Φόρτωση βιβλιοθήκης (Context)
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
         try:
             syncer = SyncService()
@@ -31,11 +32,13 @@ def render(user):
     # Init History
     if "messages" not in st.session_state: st.session_state.messages = []
     
-    # --- 4. DISPLAY HISTORY ---
+    # --- 4. DISPLAY CHAT HISTORY ---
+    # Εδώ εμφανίζονται τα μηνύματα
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
             
+            # Εμφάνιση πηγών
             if msg["role"] == "assistant" and "sources" in msg:
                 with st.expander("📚 Πηγές"):
                     for src in msg["sources"]:
@@ -45,7 +48,7 @@ def render(user):
                             st.markdown(f"📄 **{src['name']}**")
 
     # --- 5. INPUT AREA (Η Μπάρα) ---
-    # Αυτό είναι το κρίσιμο σημείο. Πρέπει να είναι εκτός if/else.
+    # Αυτή η εντολή εμφανίζει το πεδίο γραφής στο κάτω μέρος
     prompt = st.chat_input("Γράψε εδώ τη βλάβη...")
     
     if prompt:
@@ -53,7 +56,7 @@ def render(user):
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"): st.markdown(prompt)
         
-        # B. Context Search
+        # B. Context Search (Ψάχνουμε manual)
         found_files = []
         keywords = prompt.lower().split()
         library = st.session_state.library_cache
