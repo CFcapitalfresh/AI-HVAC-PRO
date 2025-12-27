@@ -1,100 +1,71 @@
-"""
-CORE MODULE: AUTH MANAGER
--------------------------
-Security handling, Password Hashing, User Verification.
-"""
-
-import hashlib
-import logging
-import pandas as pd
-from datetime import datetime
-from typing import Tuple, Optional, Dict
+import streamlit as st
+import bcrypt
 from core.db_connector import DatabaseConnector
-
-logger = logging.getLogger("Core.Auth")
+from datetime import datetime
 
 class AuthManager:
-    """Κλάση Ασφαλείας Συστήματος."""
-
     @staticmethod
-    def _hash_password(password: str) -> str:
-        """Δημιουργεί SHA-256 hash για τον κωδικό."""
-        return hashlib.sha256(password.encode()).hexdigest()
+    def verify_login(email, password):
+        # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT (Αυτό λύνει το πρόβλημα του κινητού)
+        # Σβήνει κενά (space) από την αρχή και το τέλος
+        # Μετατρέπει τα κεφαλαία σε μικρά για το email
+        email = email.strip().lower()  
+        password = password.strip()
 
-    @staticmethod
-    def verify_login(email: str, password: str) -> Tuple[Optional[Dict], str]:
-        """
-        Ελέγχει τα διαπιστευτήρια.
-        Returns: (UserDict, StatusMessage)
-        Status: OK, WRONG, BLOCKED, PENDING, ERROR
-        """
-        # Admin Override (Backdoor for emergency)
-        if email == "admin" and password == "admin":
-            return {
-                "email": "admin",
-                "name": "System Administrator",
-                "role": "admin",
-                "status": "approved"
-            }, "OK"
+        users = DatabaseConnector.fetch_data("Users")
+        if users.empty: return None, "No users found"
 
+        # Αναζήτηση χρήστη
+        user = users[users['email'] == email]
+        
+        if user.empty: return None, "User not found"
+        
+        user_data = user.iloc[0]
+        stored_hash = user_data['password_hash']
+        
+        # Έλεγχος Κωδικού
         try:
-            # Καθαρισμός Input (Sanitization)
-            clean_email = email.strip().lower()
-            
-            # Ανάκτηση χρηστών
-            users_df = DatabaseConnector.fetch_data("Users")
-            
-            if users_df.empty:
-                logger.warning("Users DB is empty or unreachable.")
-                return None, "ERROR"
-
-            # Αναζήτηση Χρήστη
-            user_row = users_df[users_df['email'].astype(str).str.lower() == clean_email]
-
-            if user_row.empty:
-                return None, "WRONG"
-
-            user_data = user_row.iloc[0].to_dict()
-            stored_hash = str(user_data.get('password', ''))
-            
-            # Έλεγχος Κωδικού
-            if stored_hash == AuthManager._hash_password(password):
-                status = user_data.get('status', 'pending')
-                if status == 'approved':
-                    return user_data, "OK"
-                elif status == 'blocked':
-                    return None, "BLOCKED"
+            # Περίπτωση 1: Παλιός κωδικός (απλό κείμενο)
+            if not stored_hash.startswith('$2b$'):
+                if stored_hash == password:
+                    return user_data.to_dict(), "OK"
                 else:
-                    return None, "PENDING"
+                    return None, "Wrong password"
+            
+            # Περίπτωση 2: Νέος ασφαλής κωδικός (Hash)
+            if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+                # Έλεγχος αν ο χρήστης είναι ενεργός
+                if user_data['role'] == 'active' or user_data['role'] == 'admin':
+                    return user_data.to_dict(), "OK"
+                else:
+                    return None, "Account Pending Approval" # Περιμένει έγκριση
             else:
-                return None, "WRONG"
-
-        except Exception as e:
-            logger.error(f"Login Exception: {e}")
-            return None, "ERROR"
+                return None, "Wrong password"
+        except:
+            return None, "Auth Error"
 
     @staticmethod
-    def register_new_user(email: str, name: str, password: str) -> bool:
-        """Εγγράφει νέο χρήστη στη βάση."""
-        try:
-            clean_email = email.strip().lower()
-            users_df = DatabaseConnector.fetch_data("Users")
+    def register_new_user(email, name, password):
+        # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT
+        email = email.strip().lower()
+        name = name.strip()
+        password = password.strip()
 
-            # Έλεγχος διπλοεγγραφής
-            if not users_df.empty and clean_email in users_df['email'].astype(str).str.lower().values:
-                return False
-
-            new_user = pd.DataFrame([{
-                "email": clean_email,
-                "name": name.strip(),
-                "password": AuthManager._hash_password(password),
-                "role": "user",
-                "status": "pending",
-                "joined": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "last_login": ""
-            }])
-
-            return DatabaseConnector.append_row("Users", new_user)
-        except Exception as e:
-            logger.error(f"Registration Exception: {e}")
+        # Έλεγχος αν υπάρχει ήδη το email
+        users = DatabaseConnector.fetch_data("Users")
+        if not users.empty and email in users['email'].values:
             return False
+        
+        # Κρυπτογράφηση κωδικού (Hash)
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Δημιουργία εγγραφής
+        new_user = [
+            str(datetime.now()), # Ημερομηνία
+            email,
+            name,
+            hashed,
+            "pending" # Role (Μπαίνει ως 'pending' και θέλει έγκριση από Admin)
+        ]
+        
+        return DatabaseConnector.append_data("Users", new_user)
