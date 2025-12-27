@@ -3,36 +3,25 @@ import json
 import os
 from core.language_pack import get_text
 from core.ai_engine import AIEngine
+from services.sync_service import SyncService # <--- ΝΕΟ IMPORT
 from PIL import Image
-
-def load_cached_library():
-    """Φορτώνει τη βιβλιοθήκη από το αρχείο JSON."""
-    try:
-        if os.path.exists("drive_index.json"):
-            with open("drive_index.json", "r", encoding="utf-8") as f:
-                return json.load(f)
-    except: pass
-    return []
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
-
     st.header(f"{get_text('menu_chat', lang)}")
 
     brain = AIEngine()
     
-    # 1. ΦΟΡΤΩΣΗ ΒΙΒΛΙΟΘΗΚΗΣ
+    # --- SMART LOAD (CLOUD PERSISTENCE) ---
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
-        st.session_state.library_cache = load_cached_library()
+        srv = SyncService()
+        st.session_state.library_cache = srv.load_index()
 
-    # 2. ΑΡΧΙΚΟΠΟΙΗΣΗ ΙΣΤΟΡΙΚΟΥ
+    # Init Session
     if "messages" not in st.session_state: st.session_state.messages = []
-    
-    # 3. ΜΝΗΜΗ "STICKY CONTEXT" (Για να θυμάται το manual στη 2η ερώτηση)
-    if "active_manuals" not in st.session_state:
-        st.session_state.active_manuals = [] 
+    if "active_manuals" not in st.session_state: st.session_state.active_manuals = [] 
 
-    # Εμφάνιση Μηνυμάτων
+    # History
     if not st.session_state.messages:
         st.info(get_text('chat_intro', lang))
 
@@ -42,39 +31,27 @@ def render(user):
 
     st.divider()
     
-    # --- ΖΩΝΗ ΠΟΛΥΜΕΣΩΝ (Κάμερα, Μικρόφωνο, Αρχεία) ---
+    # --- MEDIA INPUTS ---
     captured_image = None
     captured_audio = None
     uploaded_files = []
 
     with st.expander(f"📎 {get_text('media_expander', lang)} / Uploads", expanded=False):
-        t1, t2, t3 = st.tabs(["📸 Camera", "🎙️ Voice", "📂 Files (PDF/Img)"])
-        
+        t1, t2, t3 = st.tabs(["📸 Camera", "🎙️ Voice", "📂 Files"])
         with t1:
             img_input = st.camera_input(get_text('camera_label', lang))
-            if img_input:
-                captured_image = Image.open(img_input)
-                st.success("📸 Image Ready!")
+            if img_input: captured_image = Image.open(img_input)
         with t2:
             audio_val = st.audio_input(get_text('audio_label', lang))
-            if audio_val:
-                captured_audio = audio_val
-                st.success("🎙️ Audio Recorded!")
+            if audio_val: captured_audio = audio_val
         with t3:
             uploaded_files = st.file_uploader("Manuals/Photos", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
-            if uploaded_files: st.success(f"📎 {len(uploaded_files)} files.")
 
-    # --- INPUT AREA ---
-    prompt_placeholder = get_text('chat_placeholder', lang)
-    if captured_audio or captured_image or uploaded_files:
-        prompt_placeholder = "Press Enter to send..."
-
-    prompt = st.chat_input(prompt_placeholder)
+    # --- INPUT & LOGIC ---
+    prompt = st.chat_input(get_text('chat_placeholder', lang))
     
     if prompt or captured_audio or captured_image or uploaded_files:
-        
         final_prompt = prompt if prompt else "(Sent Media)"
-
         st.session_state.messages.append({"role": "user", "content": final_prompt})
         with st.chat_message("user"): 
             st.markdown(final_prompt)
@@ -83,81 +60,49 @@ def render(user):
             if uploaded_files: 
                 for f in uploaded_files: st.caption(f"📎 {f.name}")
 
-        # ---------------------------------------------------------
-        # 🟢 ΒΕΛΤΙΩΣΗ: RANKING SYSTEM (Βαθμολογία Ταιριάσματος)
-        # ---------------------------------------------------------
+        # --- RANKING SYSTEM ---
         found_files_names = ""
-        
         if prompt:
-            # Αφαίρεση κοινών λέξεων (Stopwords) για να εστιάσουμε στο μοντέλο
-            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the", "in", "on"]
-            raw_keywords = prompt.lower().split()
-            keywords = [w for w in raw_keywords if w not in stopwords and len(w) > 1]
+            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem"]
+            keywords = [w for w in prompt.lower().split() if w not in stopwords and len(w) > 1]
             
             library = st.session_state.library_cache
-            scored_results = [] # Λίστα μορφής: (Score, Item)
+            scored_results = []
             
             if library:
                 for item in library:
-                    # Ενώνουμε όνομα και metadata
-                    target_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
-                    
-                    matches = 0
-                    for word in keywords:
-                        if word in target_text:
-                            matches += 1
-                    
-                    # Αν έχει έστω και ένα σημαντικό ταίριασμα
-                    if matches > 0:
-                        scored_results.append((matches, item))
+                    target = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
+                    matches = sum(1 for w in keywords if w in target)
+                    if matches > 0: scored_results.append((matches, item))
             
-            # Ταξινόμηση: Πρώτα αυτά με τα περισσότερα matches (π.χ. 4/4)
             scored_results.sort(key=lambda x: x[0], reverse=True)
-            
-            # Παίρνουμε τα top 3
             top_matches = [item for score, item in scored_results[:3]]
 
-            # 🟢 ΛΟΓΙΚΗ STICKY MEMORY
-            if top_matches:
-                # Βρήκαμε νέα; Ανανεώνουμε τη μνήμη.
-                st.session_state.active_manuals = top_matches
-            else:
-                # Δεν βρήκαμε; Κρατάμε τα παλιά (δεν κάνουμε τίποτα).
-                pass
+            if top_matches: st.session_state.active_manuals = top_matches
             
             found_files_names = ", ".join([f['name'] for f in st.session_state.active_manuals])
-
-        # ---------------------------------------------------------
 
         # --- AI GENERATION ---
         with st.chat_message("assistant"):
             with st.spinner(get_text('chat_thinking', lang)):
-                images_to_send = [captured_image] if captured_image else []
-                pdfs_to_process = []
+                imgs = [captured_image] if captured_image else []
+                pdfs = [f for f in uploaded_files if f.type == "application/pdf"]
                 for f in uploaded_files:
-                    if f.type == "application/pdf": pdfs_to_process.append(f)
-                    elif f.type.startswith("image/"): images_to_send.append(Image.open(f))
+                     if f.type.startswith("image/"): imgs.append(Image.open(f))
 
-                response_text = brain.get_chat_response(
+                resp = brain.get_chat_response(
                     st.session_state.messages, 
-                    context_files=found_files_names, # Στέλνουμε τα "Persistent" manuals
+                    context_files=found_files_names, 
                     lang=lang,
-                    images=images_to_send,
-                    audio=captured_audio,
-                    pdf_files=pdfs_to_process
+                    images=imgs, audio=captured_audio, pdf_files=pdfs
                 )
-                st.markdown(response_text)
+                st.markdown(resp)
                 
-                # Εμφάνιση των Manuals που "βλέπει" το AI
                 if st.session_state.active_manuals:
-                    with st.expander("📚 Active Context (Manuals Used)"):
+                    with st.expander("📚 Active Context"):
                         for f in st.session_state.active_manuals:
-                            link = f.get('link') or f.get('webViewLink')
-                            if link: st.markdown(f"📄 **[{f['name']}]({link})**")
+                            l = f.get('link') or f.get('webViewLink')
+                            if l: st.markdown(f"📄 **[{f['name']}]({l})**")
                             else: st.markdown(f"📄 **{f['name']}**")
 
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": response_text, 
-            "sources": st.session_state.active_manuals 
-        })
+        st.session_state.messages.append({"role": "assistant", "content": resp})
