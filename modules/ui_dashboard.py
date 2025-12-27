@@ -2,42 +2,36 @@ import streamlit as st
 from core.language_pack import get_text
 
 def render(user):
-    # Χαιρετισμός
-    st.title(f"👋 Καλωσήρθες, {user['name']}")
-    st.markdown("### Κέντρο Ελέγχου Τεχνικής Υποστήριξης")
+    lang = st.session_state.get('lang', 'gr')
+    
+    # Τίτλος & Υπότιτλος (Μεταφρασμένα)
+    st.title(f"{get_text('dash_welcome', lang)}, {user['name']}")
+    st.markdown(f"### {get_text('dash_subtitle', lang)}")
     st.divider()
 
-    # --- Γρήγορες Ενέργειες (Quick Actions) ---
-    st.subheader("🚀 Τι θέλεις να κάνεις τώρα;")
+    # --- Γρήγορες Ενέργειες ---
+    st.subheader(get_text('dash_quick', lang))
     
-    # Χρησιμοποιούμε 3 στήλες για κουμπιά-κάρτες
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        # Κουμπί για το Chat
-        st.info("🤖 **AI Τεχνικός Βοηθός**")
-        st.write("Διάγνωση βλαβών & Λύσεις")
-        if st.button("💬 Έναρξη Συνομιλίας", use_container_width=True):
-            st.session_state.app_mode = 'chat'
-            st.rerun()
+        st.info(f"🤖 **{get_text('dash_chat_card', lang)}**")
+        st.write(get_text('dash_chat_desc', lang))
+        # Χρησιμοποιούμε κενό κουμπί που απλά ενημερώνει (για UX)
+        if st.button(get_text('dash_btn_chat', lang), use_container_width=True):
+             st.info("Select 'AI Chat' from the left menu.")
 
     with col2:
-        # Κουμπί για τη Βιβλιοθήκη
-        st.warning("📚 **Βιβλιοθήκη Manuals**")
-        st.write("Αναζήτηση Εγχειριδίων")
-        if st.button("🔎 Αναζήτηση", use_container_width=True):
-            st.session_state.app_mode = 'library'
-            st.rerun()
+        st.warning(f"📚 **{get_text('dash_lib_card', lang)}**")
+        st.write(get_text('dash_lib_desc', lang))
+        if st.button(get_text('dash_btn_lib', lang), use_container_width=True):
+             st.info("Select 'Manuals Library' from the left menu.")
 
     with col3:
-        # Κουμπί για τα Εργαλεία
-        st.success("🧮 **Εργαλεία**")
-        st.write("BTU Calc & Μετατροπές")
-        if st.button("🛠️ Άνοιγμα Εργαλείων", use_container_width=True):
-            st.session_state.app_mode = 'tools'
-            st.rerun()
+        st.success(f"🧮 **{get_text('dash_tool_card', lang)}**")
+        st.write(get_text('dash_tool_desc', lang))
+        if st.button(get_text('dash_btn_tool', lang), use_container_width=True):
+             st.info("Select 'Tools' from the left menu.")
 
     st.divider()
-    
-    # --- Στατιστικά ή Info ---
-    st.caption("System Status: 🟢 Online | AI Engine: Ready")
+    st.caption(get_text('dash_status', lang))

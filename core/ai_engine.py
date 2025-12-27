@@ -1,10 +1,9 @@
 """
-CORE MODULE: AI ENGINE (BRAIN) - MULTIMODAL EDITION
----------------------------------------------------
+CORE MODULE: AI ENGINE (BRAIN) - AUTO MODEL DISCOVERY
+-----------------------------------------------------
 Features:
-- Safety Protocol (Strict Checks)
-- Auto-Discovery of Models
-- MULTIMODAL SUPPORT: Accepts Images & Audio now!
+- Auto-Detects Best Available Gemini Model (Fixes 404 Errors)
+- Supports Images & Audio (Multimodal)
 """
 
 import google.generativeai as genai
@@ -23,7 +22,30 @@ class AIEngine:
         if not self.api_key: return
         try:
             genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash') # Το Flash είναι το καλύτερο για εικόνα/ήχο
+            
+            # --- SMART MODEL DISCOVERY ---
+            # Ψάχνουμε ποιο μοντέλο είναι διαθέσιμο για να αποφύγουμε το 404
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            
+            # Λίστα προτίμησης (από το πιο γρήγορο/κατάλληλο προς τα παλιά)
+            preferred = [
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-pro",
+                "models/gemini-2.0-flash-exp",
+                "models/gemini-pro"
+            ]
+            
+            selected_model = "models/gemini-1.5-flash" # Default fallback
+            
+            # 1. Έλεγχος αν υπάρχει κάποιο από τα αγαπημένα μας
+            for p in preferred:
+                if p in available_models:
+                    selected_model = p
+                    break
+            
+            logger.info(f"AI Engine selected model: {selected_model}")
+            self.model = genai.GenerativeModel(selected_model)
+            
         except Exception as e:
             logger.critical(f"AI Setup Error: {e}")
 
@@ -31,49 +53,44 @@ class AIEngine:
         """
         Εκτελεί τη συνομιλία με υποστήριξη Εικόνας και Ήχου.
         """
-        if not self.model: return "⚠️ AI System Offline."
+        if not self.model: return "⚠️ AI System Offline (Check API Key)."
 
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # Σύστημα Ασφαλείας & Ρόλος
         system_instruction = f"""
         ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
-        CONTEXT DATA (Library Files Found): {context_files}
+        CONTEXT DATA: {context_files}
         
         INSTRUCTIONS:
-        1. Analyze any IMAGES provided (look for error codes on screens, wiring issues, burnt parts).
-        2. Listen to any AUDIO provided (identify noises like 'hissing', 'grinding', or spoken descriptions).
-        3. If specific manual is missing in context, warn the user.
-        4. Answer ONLY in {target_lang}.
+        1. Analyze IMAGES (error codes, wiring).
+        2. Listen to AUDIO (noises, descriptions).
+        3. Answer ONLY in {target_lang}.
         """
 
         try:
-            # Χτίζουμε το μήνυμα για το Gemini
-            # Το Gemini 1.5 δέχεται λίστα: [text, image_blob, audio_blob]
             current_message_parts = [system_instruction]
             
-            # Προσθήκη Εικόνων
+            # Εικόνες
             if images:
                 for img in images:
-                    # Μετατροπή σε μορφή που καταλαβαίνει το Gemini
                     current_message_parts.append(img)
-                    current_message_parts.append("\n[USER SENT AN IMAGE ABOVE]\n")
+                    current_message_parts.append("\n[USER IMAGE]\n")
 
-            # Προσθήκη Ήχου
+            # Ήχος (Live Recording ή Upload)
             if audio:
-                # Ο ήχος περνάει ως blob δεδομένα
+                # To st.audio_input επιστρέφει buffer, οπότε παίρνουμε τα bytes
+                audio_bytes = audio.getvalue()
                 current_message_parts.append({
-                    "mime_type": audio.type,
-                    "data": audio.getvalue()
+                    "mime_type": "audio/wav", # Το Streamlit recorder γράφει σε wav
+                    "data": audio_bytes
                 })
-                current_message_parts.append("\n[USER SENT AN AUDIO CLIP]\n")
+                current_message_parts.append("\n[USER AUDIO MESSAGE]\n")
 
-            # Προσθήκη της τελευταίας ερώτησης κειμένου (αν υπάρχει)
+            # Κείμενο
             last_user_msg = next((m['content'] for m in reversed(chat_history) if m['role'] == 'user'), "")
             if last_user_msg:
                  current_message_parts.append(f"User Question: {last_user_msg}")
 
-            # Στέλνουμε το πακέτο
             response = self.model.generate_content(current_message_parts)
             return response.text
             
@@ -81,5 +98,5 @@ class AIEngine:
             return f"⚠️ AI Error: {str(e)}"
 
     def extract_metadata_from_text(self, text, filename):
-        # ... (Ο κώδικας του Organizer παραμένει ίδιος) ...
+        # Απλή υλοποίηση για τον Organizer
         return "Unsorted|Unknown|Unknown|Manual"
