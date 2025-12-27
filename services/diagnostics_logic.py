@@ -1,15 +1,14 @@
 """
-SERVICE: DIAGNOSTICS LOGIC (ROBUST VERSION)
--------------------------------------------
+SERVICE: DIAGNOSTICS LOGIC (ROBUST & DEBUG VERSION)
+---------------------------------------------------
 Description: Specialized AI service that generates step-by-step 
-diagnostic checklists in structured JSON format.
-Includes robust error handling and JSON extraction.
+diagnostic checklists. Includes advanced JSON parsing and error reporting.
 """
 
 import google.generativeai as genai
 import json
 import logging
-import streamlit as st # Προσθήκη για να δείχνουμε τα errors
+import streamlit as st  # <--- Προσθήκη για να δείχνουμε τα σφάλματα στην οθόνη
 from core.config_loader import ConfigLoader
 
 logger = logging.getLogger("Service.Diagnostics")
@@ -24,16 +23,16 @@ class DiagnosticsService:
         if self.api_key:
             try:
                 genai.configure(api_key=self.api_key)
-                # Χρησιμοποιούμε το flash για ταχύτητα
                 self.model = genai.GenerativeModel('models/gemini-1.5-flash')
             except Exception as e:
-                st.error(f"❌ AI Configuration Error: {e}")
+                st.error(f"⚠️ AI Configuration Error: {e}")
         else:
             st.error("❌ API Key Missing! Ελέγξτε το αρχείο secrets.toml.")
 
     def generate_checklist(self, error_code, manual_text=""):
         """Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON."""
         if not self.model: 
+            st.error("❌ Το AI Model δεν έχει αρχικοποιηθεί (Model is None).")
             return None
 
         prompt = f"""
@@ -77,9 +76,8 @@ class DiagnosticsService:
             
             text = response.text.strip()
             
-            # --- ΒΕΛΤΙΩΜΕΝΟΣ ΚΑΘΑΡΙΣΜΟΣ JSON (ROBUST) ---
+            # --- ΠΡΟΗΓΜΕΝΟΣ ΚΑΘΑΡΙΣΜΟΣ JSON ---
             # Βρίσκουμε την πρώτη αγκύλη '{' και την τελευταία '}'
-            # Αυτό διορθώνει το πρόβλημα αν το AI δεν βάλει ```json
             start_idx = text.find('{')
             end_idx = text.rfind('}') + 1
             
@@ -87,9 +85,13 @@ class DiagnosticsService:
                 clean_json = text[start_idx:end_idx]
                 return json.loads(clean_json)
             else:
-                st.error(f"⚠️ Το AI επέστρεψε μη έγκυρη μορφή δεδομένων: {text[:100]}...")
+                # Αν αποτύχει, δείχνουμε τι έστειλε το AI για να καταλάβουμε
+                st.warning(f"⚠️ Το AI επέστρεψε μη έγκυρη μορφή: {text[:100]}...")
                 return None
             
+        except json.JSONDecodeError as e:
+            st.error(f"❌ JSON Error: Δεν μπορώ να διαβάσω την απάντηση του AI. ({e})")
+            return None
         except Exception as e:
             # Εμφάνιση του πραγματικού σφάλματος στην οθόνη
             st.error(f"❌ System Error: {str(e)}")
