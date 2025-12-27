@@ -1,10 +1,10 @@
 """
-CORE MODULE: AI ENGINE (BRAIN) - DIAGNOSTIC EDITION
----------------------------------------------------
+CORE MODULE: AI ENGINE (BRAIN) - REAL AUTO-DISCOVERY
+----------------------------------------------------
 Features:
-- Smart Model Discovery
-- DETAILED ERROR REPORTING (No more generic "Offline")
-- PDF/Image/Audio Support
+- Queries Google API for available models (list_models)
+- Fixes 404 Errors by using exact model names from the API
+- Restored PDF/Image/Audio Reading capabilities
 """
 
 import google.generativeai as genai
@@ -18,11 +18,11 @@ class AIEngine:
     def __init__(self):
         self.api_key = ConfigLoader.get_gemini_key()
         self.model = None
-        self.last_error = None # Αποθήκευση του τελευταίου σφάλματος
+        self.last_error = None
         self._setup()
 
     def _setup(self):
-        """Εκκίνηση με έλεγχο διαθέσιμων μοντέλων (Ping Test)."""
+        """Εκκίνηση με πραγματική Ερώτηση στο API (list_models)."""
         if not self.api_key:
             self.last_error = "MISSING API KEY (Check .streamlit/secrets.toml)"
             logger.critical(self.last_error)
@@ -31,36 +31,65 @@ class AIEngine:
         try:
             genai.configure(api_key=self.api_key)
             
-            # Λίστα προτεραιότητας
-            candidates = [
-                "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-pro"
+            # 1. Ρωτάμε την Google: "Ποια μοντέλα έχεις διαθέσιμα;"
+            # Φιλτράρουμε μόνο αυτά που μπορούν να παράγουν κείμενο (generateContent)
+            available_models = []
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+            except Exception as e:
+                self.last_error = f"List Models Failed: {str(e)}"
+                logger.error(self.last_error)
+                return
+
+            if not available_models:
+                self.last_error = "No available models found for this API Key."
+                logger.critical(self.last_error)
+                return
+
+            logger.info(f"📋 Available Models: {available_models}")
+
+            # 2. Λίστα Προτίμησης (Από το καλύτερο στο χειρότερο)
+            # Ψάχνουμε ακριβή ονόματα όπως τα δίνει η Google (π.χ. models/gemini-1.5-flash)
+            preferred_order = [
+                "models/gemini-1.5-pro-latest",
+                "models/gemini-1.5-pro",
+                "models/gemini-1.5-flash-latest",
+                "models/gemini-1.5-flash",
+                "models/gemini-pro",
+                "models/gemini-1.0-pro"
             ]
             
-            active_model = None
-            for m in candidates:
-                try:
-                    test_model = genai.GenerativeModel(m)
-                    # Test generation
-                    test_model.generate_content("Hi")
-                    active_model = m
-                    logger.info(f"✅ AI Connected: {m}")
+            selected_model_name = None
+
+            # Α. Ψάχνουμε τα αγαπημένα μας στη λίστα
+            for p in preferred_order:
+                if p in available_models:
+                    selected_model_name = p
                     break
-                except Exception as e:
-                    self.last_error = f"Model {m} failed: {str(e)}"
-                    continue
             
-            if active_model:
-                self.model = genai.GenerativeModel(active_model)
-                self.last_error = None # Όλα καλά
+            # Β. Αν δεν βρούμε αγαπημένο, παίρνουμε το πρώτο που έχει "gemini" στο όνομα
+            if not selected_model_name:
+                for m in available_models:
+                    if "gemini" in m:
+                        selected_model_name = m
+                        break
+            
+            # Γ. Αν όλα αποτύχουν, παίρνουμε το πρώτο διαθέσιμο
+            if not selected_model_name and available_models:
+                selected_model_name = available_models[0]
+
+            if selected_model_name:
+                self.model = genai.GenerativeModel(selected_model_name)
+                logger.info(f"✅ AI Connected using: {selected_model_name}")
+                self.last_error = None
             else:
-                # Αν αποτύχουν όλα, κρατάμε το τελευταίο σφάλμα
-                if not self.last_error: self.last_error = "All models failed connection check."
-                logger.critical(f"❌ AI Connection Failed. Last error: {self.last_error}")
+                self.last_error = "Could not select a valid Gemini model."
+                logger.critical(self.last_error)
                 
         except Exception as e:
-            self.last_error = f"Configuration Error: {str(e)}"
+            self.last_error = f"AI Setup Critical Error: {str(e)}"
             logger.critical(self.last_error)
 
     def _extract_text_from_pdfs(self, pdf_files):
@@ -83,9 +112,8 @@ class AIEngine:
     def get_chat_response(self, chat_history, context_files="", lang="gr", images=None, audio=None, pdf_files=None):
         """Κύρια συνάρτηση απάντησης."""
         
-        # ΑΝ ΥΠΑΡΧΕΙ ΣΦΑΛΜΑ, ΤΟ ΕΜΦΑΝΙΖΟΥΜΕ ΣΤΟΝ ΧΡΗΣΤΗ
         if not self.model: 
-            return f"⚠️ **AI System Offline**\n\n🔍 **Διάγνωση Σφάλματος:** `{self.last_error}`\n\nΠαρακαλώ ελέγξτε το API Key ή τη σύνδεση."
+            return f"⚠️ **AI System Offline**\n\n🔍 **Αιτία:** `{self.last_error}`\n\nΤο σύστημα προσπάθησε να βρει αυτόματα μοντέλο αλλά απέτυχε."
 
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
@@ -127,7 +155,7 @@ class AIEngine:
             last_msg = next((m['content'] for m in reversed(chat_history) if m['role'] == 'user'), "")
             if last_msg: msg_parts.append(f"Question: {last_msg}")
 
-            gen_config = genai.types.GenerationConfig(temperature=0.3, max_output_tokens=1000)
+            gen_config = genai.types.GenerationConfig(temperature=0.3, max_output_tokens=1500)
             response = self.model.generate_content(msg_parts, generation_config=gen_config)
             return response.text
             
