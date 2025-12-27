@@ -1,13 +1,15 @@
 """
-SERVICE: DIAGNOSTICS LOGIC
---------------------------
+SERVICE: DIAGNOSTICS LOGIC (ROBUST VERSION)
+-------------------------------------------
 Description: Specialized AI service that generates step-by-step 
 diagnostic checklists in structured JSON format.
+Includes robust error handling and JSON extraction.
 """
 
 import google.generativeai as genai
 import json
 import logging
+import streamlit as st # Προσθήκη για να δείχνουμε τα errors
 from core.config_loader import ConfigLoader
 
 logger = logging.getLogger("Service.Diagnostics")
@@ -20,13 +22,19 @@ class DiagnosticsService:
 
     def _setup(self):
         if self.api_key:
-            genai.configure(api_key=self.api_key)
-            # Χρησιμοποιούμε το flash για ταχύτητα
-            self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+            try:
+                genai.configure(api_key=self.api_key)
+                # Χρησιμοποιούμε το flash για ταχύτητα
+                self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+            except Exception as e:
+                st.error(f"❌ AI Configuration Error: {e}")
+        else:
+            st.error("❌ API Key Missing! Ελέγξτε το αρχείο secrets.toml.")
 
     def generate_checklist(self, error_code, manual_text=""):
         """Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON."""
-        if not self.model: return None
+        if not self.model: 
+            return None
 
         prompt = f"""
         ROLE: You are an Expert HVAC Field Technician.
@@ -61,19 +69,29 @@ class DiagnosticsService:
         """
         
         try:
+            # Ζητάμε JSON response
             response = self.model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
             
-            clean_json = response.text.strip()
-            if clean_json.startswith("```json"):
-                clean_json = clean_json[7:-3]
-            elif clean_json.startswith("```"):
-                clean_json = clean_json[3:-3]
-                
-            return json.loads(clean_json)
+            text = response.text.strip()
+            
+            # --- ΒΕΛΤΙΩΜΕΝΟΣ ΚΑΘΑΡΙΣΜΟΣ JSON (ROBUST) ---
+            # Βρίσκουμε την πρώτη αγκύλη '{' και την τελευταία '}'
+            # Αυτό διορθώνει το πρόβλημα αν το AI δεν βάλει ```json
+            start_idx = text.find('{')
+            end_idx = text.rfind('}') + 1
+            
+            if start_idx != -1 and end_idx != -1:
+                clean_json = text[start_idx:end_idx]
+                return json.loads(clean_json)
+            else:
+                st.error(f"⚠️ Το AI επέστρεψε μη έγκυρη μορφή δεδομένων: {text[:100]}...")
+                return None
             
         except Exception as e:
-            logger.error(f"Diagnostics JSON Error: {e}")
+            # Εμφάνιση του πραγματικού σφάλματος στην οθόνη
+            st.error(f"❌ System Error: {str(e)}")
+            logger.error(f"Diagnostics Error: {e}")
             return None

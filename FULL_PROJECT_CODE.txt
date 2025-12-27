@@ -1,5 +1,151 @@
 
 ==================================================
+📂 ΑΡΧΕΙΟ: .\main.py
+==================================================
+import streamlit as st
+from core.auth_manager import AuthManager
+from core.language_pack import get_text
+# ΠΡΟΣΘΗΚΗ: ui_diagnostics στη λίστα imports
+from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search, ui_diagnostics
+
+st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
+
+def init_session():
+    if 'user_info' not in st.session_state: st.session_state.user_info = None
+    if 'lang' not in st.session_state: st.session_state.lang = 'gr'
+
+def handle_logout():
+    st.session_state.user_info = None
+    st.session_state.messages = [] 
+    st.session_state.diag_plan = None # Καθαρισμός Wizard
+    st.rerun()
+
+def main():
+    init_session()
+    lang = st.session_state.lang
+
+    # --- LOGIN SCREEN ---
+    if not st.session_state.user_info:
+        st.header(f"🔐 {get_text('app_title', lang)}")
+        
+        c_lang, _ = st.columns([1,5])
+        with c_lang:
+            sel = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1)
+            st.session_state.lang = 'gr' if sel == "Ελληνικά" else 'en'
+            if st.session_state.lang != lang: st.rerun()
+
+        t1, t2 = st.tabs([get_text('login_tab', lang), get_text('register_tab', lang)])
+        
+        with t1:
+            with st.form("login"):
+                email = st.text_input(get_text('email_lbl', lang))
+                pwd = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_login', lang), use_container_width=True):
+                    user, msg = AuthManager.verify_login(email, pwd)
+                    if user:
+                        st.session_state.user_info = user
+                        st.rerun()
+                    else: st.error(msg)
+        with t2:
+            with st.form("reg"):
+                ne = st.text_input(get_text('email_lbl', lang))
+                nn = st.text_input(get_text('name_lbl', lang))
+                np = st.text_input(get_text('pass_lbl', lang), type="password")
+                if st.form_submit_button(get_text('btn_register', lang), use_container_width=True):
+                    if AuthManager.register_new_user(ne, nn, np): st.success(get_text('reg_success', lang))
+                    else: st.error("Error")
+        return 
+
+    # --- MAIN APP ---
+    user = st.session_state.user_info
+    role = user.get('role', 'active')
+
+    # SIDEBAR
+    with st.sidebar:
+        st.write(f"👤 **{user['name']}**")
+        st.caption(f"Role: {role.upper()}")
+        st.divider()
+        
+        l_sel = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
+        new_lang = 'gr' if l_sel == "Ελληνικά" else 'en'
+        if new_lang != lang:
+            st.session_state.lang = new_lang
+            st.rerun()
+
+        st.divider()
+        
+        # Menu - ΠΡΟΣΘΗΚΗ ΤΟΥ ACTIVE DIAGNOSTICS
+        opts = {
+            get_text('menu_dashboard', new_lang): "dash",
+            "🔧 Active Diagnostics": "diag", # <--- ΝΕΑ ΕΠΙΛΟΓΗ
+            get_text('menu_chat', new_lang): "chat",
+            get_text('menu_library', new_lang): "lib",
+            get_text('menu_clients', new_lang): "clients",
+            get_text('menu_organizer', new_lang): "org",
+            get_text('menu_tools', new_lang): "tools"
+        }
+        if role == 'admin':
+            opts[get_text('menu_admin', new_lang)] = "admin"
+
+        # Auto-Routing
+        default_idx = 0
+        if 'app_mode' in st.session_state:
+            try:
+                target = st.session_state.app_mode
+                if target == 'library': target = 'lib'
+                vals = list(opts.values())
+                if target in vals:
+                    default_idx = vals.index(target)
+            except: pass
+            del st.session_state.app_mode
+
+        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()), index=default_idx)
+        selection_code = opts[selection_label]
+        
+        st.divider()
+        
+        if selection_code == "chat":
+            if st.button(f"➕ {get_text('new_chat_side', new_lang)}", type="primary", use_container_width=True):
+                st.session_state.messages = []
+                st.rerun()
+        
+        if st.button(get_text('logout', new_lang)):
+            handle_logout()
+
+    # ROUTING
+    if selection_code == "dash": ui_dashboard.render(user)
+    elif selection_code == "chat": ui_chat.render(user)
+    elif selection_code == "diag": ui_diagnostics.render(user) # <--- ΣΥΝΔΕΣΗ ΝΕΟΥ UI
+    elif selection_code == "lib": ui_search.render(user)
+    elif selection_code == "clients": ui_clients.render(user)
+    elif selection_code == "org": ui_organizer.render(user)
+    elif selection_code == "tools": ui_tools.render(user)
+    elif selection_code == "admin": ui_admin_panel.render(user)
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\requirements.txt
+==================================================
+streamlit>=1.40.0
+pandas
+google-generativeai>=0.8.0
+google-auth
+google-auth-oauthlib
+google-api-python-client
+st-gsheets-connection
+pypdf
+Pillow
+bcrypt
+openpyxl
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\version.py
+==================================================
+VERSION = "1.0.0"
+
+==================================================
 📂 ΑΡΧΕΙΟ: .\diagnose.py
 ==================================================
 # Αρχείο: diagnose.py
@@ -157,149 +303,6 @@ except Exception as e:
 
 st.divider()
 st.write("Η διάγνωση ολοκληρώθηκε.")
-
-==================================================
-📂 ΑΡΧΕΙΟ: .\main.py
-==================================================
-import streamlit as st
-from core.auth_manager import AuthManager
-from core.language_pack import get_text
-# ΠΡΟΣΘΗΚΗ: ui_search για τη Βιβλιοθήκη
-from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search
-
-st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
-
-def init_session():
-    if 'user_info' not in st.session_state: st.session_state.user_info = None
-    if 'lang' not in st.session_state: st.session_state.lang = 'gr'
-
-def handle_logout():
-    st.session_state.user_info = None
-    st.session_state.messages = [] 
-    st.rerun()
-
-def main():
-    init_session()
-    lang = st.session_state.lang
-
-    # --- LOGIN SCREEN ---
-    if not st.session_state.user_info:
-        st.header(f"🔐 {get_text('app_title', lang)}")
-        
-        c_lang, _ = st.columns([1,5])
-        with c_lang:
-            sel = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1)
-            st.session_state.lang = 'gr' if sel == "Ελληνικά" else 'en'
-            if st.session_state.lang != lang: st.rerun()
-
-        t1, t2 = st.tabs([get_text('login_tab', lang), get_text('register_tab', lang)])
-        
-        with t1:
-            with st.form("login"):
-                email = st.text_input(get_text('email_lbl', lang))
-                pwd = st.text_input(get_text('pass_lbl', lang), type="password")
-                if st.form_submit_button(get_text('btn_login', lang), use_container_width=True):
-                    user, msg = AuthManager.verify_login(email, pwd)
-                    if user:
-                        st.session_state.user_info = user
-                        st.rerun()
-                    else: st.error(msg)
-        with t2:
-            with st.form("reg"):
-                ne = st.text_input(get_text('email_lbl', lang))
-                nn = st.text_input(get_text('name_lbl', lang))
-                np = st.text_input(get_text('pass_lbl', lang), type="password")
-                if st.form_submit_button(get_text('btn_register', lang), use_container_width=True):
-                    if AuthManager.register_new_user(ne, nn, np): st.success(get_text('reg_success', lang))
-                    else: st.error("Error")
-        return 
-
-    # --- MAIN APP ---
-    user = st.session_state.user_info
-    role = user.get('role', 'active')
-
-    # SIDEBAR
-    with st.sidebar:
-        st.write(f"👤 **{user['name']}**")
-        st.caption(f"Role: {role.upper()}")
-        st.divider()
-        
-        l_sel = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
-        new_lang = 'gr' if l_sel == "Ελληνικά" else 'en'
-        if new_lang != lang:
-            st.session_state.lang = new_lang
-            st.rerun()
-
-        st.divider()
-        
-        # Menu (Πλήρες)
-        opts = {
-            get_text('menu_dashboard', new_lang): "dash",
-            get_text('menu_chat', new_lang): "chat",
-            get_text('menu_library', new_lang): "lib", # <--- Η Βιβλιοθήκη!
-            get_text('menu_clients', new_lang): "clients",
-            get_text('menu_organizer', new_lang): "org",
-            get_text('menu_tools', new_lang): "tools"
-        }
-        if role == 'admin':
-            opts[get_text('menu_admin', new_lang)] = "admin"
-
-        # Auto-Routing από Dashboard
-        default_idx = 0
-        if 'app_mode' in st.session_state:
-            try:
-                target = st.session_state.app_mode
-                if target == 'library': target = 'lib'
-                vals = list(opts.values())
-                if target in vals:
-                    default_idx = vals.index(target)
-            except: pass
-            del st.session_state.app_mode
-
-        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()), index=default_idx)
-        selection_code = opts[selection_label]
-        
-        st.divider()
-        
-        if selection_code == "chat":
-            if st.button(f"➕ {get_text('new_chat_side', new_lang)}", type="primary", use_container_width=True):
-                st.session_state.messages = []
-                st.rerun()
-        
-        if st.button(get_text('logout', new_lang)):
-            handle_logout()
-
-    # ROUTING
-    if selection_code == "dash": ui_dashboard.render(user)
-    elif selection_code == "chat": ui_chat.render(user)
-    elif selection_code == "lib": ui_search.render(user) # <--- Σύνδεση
-    elif selection_code == "clients": ui_clients.render(user)
-    elif selection_code == "org": ui_organizer.render(user)
-    elif selection_code == "tools": ui_tools.render(user)
-    elif selection_code == "admin": ui_admin_panel.render(user)
-
-if __name__ == "__main__":
-    main()
-
-==================================================
-📂 ΑΡΧΕΙΟ: .\requirements.txt
-==================================================
-streamlit>=1.40.0
-pandas
-google-generativeai>=0.8.0
-google-auth
-google-auth-oauthlib
-google-api-python-client
-st-gsheets-connection
-pypdf
-Pillow
-bcrypt
-openpyxl
-
-==================================================
-📂 ΑΡΧΕΙΟ: .\version.py
-==================================================
-VERSION = "1.0.0"
 
 ==================================================
 📂 ΑΡΧΕΙΟ: .\app_modules\admin_dashboard.py
@@ -1777,6 +1780,97 @@ def render(user):
     st.caption(get_text('dash_status', lang))
 
 ==================================================
+📂 ΑΡΧΕΙΟ: .\modules\ui_diagnostics.py
+==================================================
+"""
+MODULE: UI DIAGNOSTICS (WIZARD)
+-------------------------------
+Description: Interactive, step-by-step troubleshooting wizard.
+"""
+
+import streamlit as st
+from services.diagnostics_logic import DiagnosticsService
+import time
+
+def render(user):
+    st.header("🔧 Active Diagnostics / Διαδραστικός Οδηγός")
+    st.caption("Step-by-Step AI Troubleshooting Wizard")
+    
+    if 'diag_step' not in st.session_state: st.session_state.diag_step = 0
+    if 'diag_plan' not in st.session_state: st.session_state.diag_plan = None
+    
+    # 1. Input Section
+    if not st.session_state.diag_plan:
+        with st.container(border=True):
+            st.subheader("🚀 Start New Diagnosis")
+            error_input = st.text_input("Περιγράψτε το πρόβλημα (π.χ. Error 104)", placeholder="Error code...")
+            
+            # Προσπάθεια ανάκτησης Context από το Chat (αν υπάρχει)
+            manual_context = ""
+            if 'active_manuals' in st.session_state and st.session_state.active_manuals:
+                st.info(f"📚 Context: {st.session_state.active_manuals[0]['name']}")
+                manual_context = str(st.session_state.active_manuals[0])
+
+            if st.button("🛠️ Δημιουργία Σχεδίου", type="primary", use_container_width=True):
+                if error_input:
+                    with st.spinner("🤖 Σχεδιασμός βημάτων ελέγχου..."):
+                        service = DiagnosticsService()
+                        plan = service.generate_checklist(error_input, manual_context)
+                        
+                        if plan:
+                            st.session_state.diag_plan = plan
+                            st.session_state.diag_step = 0
+                            st.rerun()
+                        else:
+                            st.error("Απέτυχε η δημιουργία πλάνου.")
+    
+    # 2. Active Wizard
+    else:
+        plan = st.session_state.diag_plan
+        steps = plan.get('steps', [])
+        current_idx = st.session_state.diag_step
+        
+        st.subheader(f"🛡️ {plan.get('title', 'Troubleshooting')}")
+        progress = (current_idx / len(steps))
+        st.progress(progress, text=f"Βήμα {current_idx + 1} από {len(steps)}")
+        
+        if current_idx >= len(steps):
+            st.success("✅ Η διαδικασία ολοκληρώθηκε!")
+            if st.button("🔙 Νέα Διάγνωση"):
+                st.session_state.diag_plan = None
+                st.session_state.diag_step = 0
+                st.rerun()
+            return
+
+        step = steps[current_idx]
+        
+        with st.container(border=True):
+            st.markdown(f"### 🔹 Βήμα {step['id']}")
+            st.markdown(f"**Ενέργεια:** {step['action']}")
+            if 'tip' in step:
+                st.info(f"💡 Tip: {step['tip']}")
+            
+            st.divider()
+            st.markdown(f"❓ **Ερώτηση:** {step['question']}")
+            
+            c1, c2 = st.columns(2)
+            
+            if c1.button("✅ ΝΑΙ / Λύθηκε", use_container_width=True):
+                st.balloons()
+                st.success("Το πρόβλημα επιλύθηκε!")
+                time.sleep(2)
+                st.session_state.diag_plan = None
+                st.rerun()
+                
+            if c2.button("❌ ΟΧΙ / Συνέχεια", use_container_width=True):
+                st.session_state.diag_step += 1
+                st.rerun()
+        
+        if st.button("⚠️ Ακύρωση"):
+            st.session_state.diag_plan = None
+            st.rerun()
+
+==================================================
 📂 ΑΡΧΕΙΟ: .\services\__init__.py
 ==================================================
 
@@ -2004,3 +2098,86 @@ class SorterService:
         q_id = self.drive.create_folder(folder_name, self.root_id)
         if q_id:
             self.drive.move_file(pdf_item['id'], q_id)
+
+==================================================
+📂 ΑΡΧΕΙΟ: .\services\diagnostics_logic.py
+==================================================
+"""
+SERVICE: DIAGNOSTICS LOGIC
+--------------------------
+Description: Specialized AI service that generates step-by-step 
+diagnostic checklists in structured JSON format.
+"""
+
+import google.generativeai as genai
+import json
+import logging
+from core.config_loader import ConfigLoader
+
+logger = logging.getLogger("Service.Diagnostics")
+
+class DiagnosticsService:
+    def __init__(self):
+        self.api_key = ConfigLoader.get_gemini_key()
+        self.model = None
+        self._setup()
+
+    def _setup(self):
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+            # Χρησιμοποιούμε το flash για ταχύτητα
+            self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+
+    def generate_checklist(self, error_code, manual_text=""):
+        """Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON."""
+        if not self.model: return None
+
+        prompt = f"""
+        ROLE: You are an Expert HVAC Field Technician.
+        TASK: Create a strictly structured troubleshooting checklist for the following issue.
+        
+        ISSUE/ERROR CODE: {error_code}
+        MANUAL CONTEXT: {manual_text[:5000]} (Use this if relevant)
+
+        REQUIREMENTS:
+        1. Break down the solution into logical, sequential STEPS.
+        2. Each step must be a binary check (Yes/No) or an Action.
+        3. OUTPUT FORMAT: Pure JSON only. No markdown.
+        
+        JSON STRUCTURE:
+        {{
+            "title": "Diagnosis for [Error Code]",
+            "steps": [
+                {{
+                    "id": 1,
+                    "action": "Check water pressure gauge.",
+                    "question": "Is the pressure above 1.0 bar?",
+                    "tip": "Locate the gauge usually at the bottom."
+                }},
+                {{
+                    "id": 2,
+                    "action": "Reset the device.",
+                    "question": "Did the error clear after reset?",
+                    "tip": "Press and hold 'R' for 5 seconds."
+                }}
+            ]
+        }}
+        """
+        
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            
+            clean_json = response.text.strip()
+            if clean_json.startswith("```json"):
+                clean_json = clean_json[7:-3]
+            elif clean_json.startswith("```"):
+                clean_json = clean_json[3:-3]
+                
+            return json.loads(clean_json)
+            
+        except Exception as e:
+            logger.error(f"Diagnostics JSON Error: {e}")
+            return None
