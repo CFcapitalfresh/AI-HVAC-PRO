@@ -950,21 +950,35 @@ class ConfigLoader:
 
     @staticmethod
     def get_gemini_key():
-        """Ανακτά το API Key για το AI."""
+        """Ανακτά το API Key για το AI (ψάχνει παντού)."""
+        # 1. Έλεγχος στο [general] section
         try:
             return st.secrets["general"]["GEMINI_KEY"]
-        except Exception:
-            logger.error("Gemini Key not found in secrets.")
-            return None
+        except: pass
+        
+        # 2. Έλεγχος στο root level (παλιά μέθοδος)
+        try:
+            return st.secrets["GEMINI_KEY"]
+        except: pass
+        
+        # 3. Έλεγχος στα environment variables (για local testing)
+        try:
+            import os
+            return os.environ.get("GEMINI_KEY")
+        except: pass
+
+        logger.error("Gemini Key not found in secrets.")
+        return None
 
     @staticmethod
     def get_drive_folder_id():
         """Ανακτά το ID του κεντρικού φακέλου στο Drive."""
         try:
             return st.secrets["drive_config"]["folder_id"]
-        except Exception:
-            logger.error("Drive Folder ID not found.")
-            return None
+        except:
+            # Fallback αν είναι χύμα
+            try: return st.secrets["DRIVE_FOLDER_ID"]
+            except: return None
 
     @staticmethod
     def get_service_account_info():
@@ -973,7 +987,7 @@ class ConfigLoader:
             # Μετατροπή σε dict γιατί το streamlit το δίνει ως AttrDict
             return dict(st.secrets["gcp_service_account"])
         except Exception:
-            logger.critical("GCP Service Account secrets missing.")
+            # logger.critical("GCP Service Account secrets missing.")
             return None
 
 ==================================================
@@ -1093,12 +1107,12 @@ class DriveManager:
 📂 ΑΡΧΕΙΟ: .\core\ai_engine.py
 ==================================================
 """
-CORE MODULE: AI ENGINE (BRAIN) - FULL CAPACITY
-----------------------------------------------
+CORE MODULE: AI ENGINE (BRAIN) - REAL AUTO-DISCOVERY
+----------------------------------------------------
 Features:
-- Smart Model Discovery (No 404 Errors)
-- Multi-Modal: Images, Audio AND PDF Reading (Restored)
-- Enhanced Technician Persona
+- Queries Google API for available models (list_models)
+- Fixes 404 Errors by using exact model names from the API
+- Restored PDF/Image/Audio Reading capabilities
 """
 
 import google.generativeai as genai
@@ -1112,53 +1126,88 @@ class AIEngine:
     def __init__(self):
         self.api_key = ConfigLoader.get_gemini_key()
         self.model = None
+        self.last_error = None
         self._setup()
 
     def _setup(self):
-        """Εκκίνηση με έλεγχο διαθέσιμων μοντέλων (Ping Test)."""
+        """Εκκίνηση με πραγματική Ερώτηση στο API (list_models)."""
         if not self.api_key:
-            logger.critical("AI Setup Failed: No API Key.")
+            self.last_error = "MISSING API KEY (Check .streamlit/secrets.toml)"
+            logger.critical(self.last_error)
             return
         
         try:
             genai.configure(api_key=self.api_key)
             
-            # Λίστα προτεραιότητας μοντέλων
-            candidates = [
-                "gemini-1.5-flash",
-                "models/gemini-1.5-flash",
-                "gemini-1.5-pro",
+            # 1. Ρωτάμε την Google: "Ποια μοντέλα έχεις διαθέσιμα;"
+            # Φιλτράρουμε μόνο αυτά που μπορούν να παράγουν κείμενο (generateContent)
+            available_models = []
+            try:
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+            except Exception as e:
+                self.last_error = f"List Models Failed: {str(e)}"
+                logger.error(self.last_error)
+                return
+
+            if not available_models:
+                self.last_error = "No available models found for this API Key."
+                logger.critical(self.last_error)
+                return
+
+            logger.info(f"📋 Available Models: {available_models}")
+
+            # 2. Λίστα Προτίμησης (Από το καλύτερο στο χειρότερο)
+            # Ψάχνουμε ακριβή ονόματα όπως τα δίνει η Google (π.χ. models/gemini-1.5-flash)
+            preferred_order = [
+                "models/gemini-1.5-pro-latest",
                 "models/gemini-1.5-pro",
-                "gemini-pro"
+                "models/gemini-1.5-flash-latest",
+                "models/gemini-1.5-flash",
+                "models/gemini-pro",
+                "models/gemini-1.0-pro"
             ]
             
-            active_model = None
-            for m in candidates:
-                try:
-                    test_model = genai.GenerativeModel(m)
-                    test_model.generate_content("Hi") # Test
-                    active_model = m
-                    logger.info(f"✅ AI Connected: {m}")
+            selected_model_name = None
+
+            # Α. Ψάχνουμε τα αγαπημένα μας στη λίστα
+            for p in preferred_order:
+                if p in available_models:
+                    selected_model_name = p
                     break
-                except: continue
             
-            if active_model:
-                self.model = genai.GenerativeModel(active_model)
+            # Β. Αν δεν βρούμε αγαπημένο, παίρνουμε το πρώτο που έχει "gemini" στο όνομα
+            if not selected_model_name:
+                for m in available_models:
+                    if "gemini" in m:
+                        selected_model_name = m
+                        break
+            
+            # Γ. Αν όλα αποτύχουν, παίρνουμε το πρώτο διαθέσιμο
+            if not selected_model_name and available_models:
+                selected_model_name = available_models[0]
+
+            if selected_model_name:
+                self.model = genai.GenerativeModel(selected_model_name)
+                logger.info(f"✅ AI Connected using: {selected_model_name}")
+                self.last_error = None
             else:
-                logger.critical("❌ AI Connection Failed.")
+                self.last_error = "Could not select a valid Gemini model."
+                logger.critical(self.last_error)
                 
         except Exception as e:
-            logger.critical(f"AI Critical Error: {e}")
+            self.last_error = f"AI Setup Critical Error: {str(e)}"
+            logger.critical(self.last_error)
 
     def _extract_text_from_pdfs(self, pdf_files):
-        """Επαναφορά της λογικής ανάγνωσης PDF από το παλιό brain.py"""
+        """Ανάγνωση PDF."""
         text_content = ""
         if not pdf_files: return ""
         
         for pdf in pdf_files:
             try:
                 reader = pypdf.PdfReader(pdf)
-                # Διαβάζουμε τις πρώτες 10 σελίδες για ταχύτητα & όριο tokens
                 limit = min(len(reader.pages), 15) 
                 text_content += f"\n--- ΑΡΧΕΙΟ: {pdf.name} ---\n"
                 for i in range(limit):
@@ -1169,22 +1218,22 @@ class AIEngine:
         return text_content
 
     def get_chat_response(self, chat_history, context_files="", lang="gr", images=None, audio=None, pdf_files=None):
-        """Κύρια συνάρτηση απάντησης με ΟΛΑ τα δεδομένα."""
-        if not self.model: return "⚠️ AI System Offline."
+        """Κύρια συνάρτηση απάντησης."""
+        
+        if not self.model: 
+            return f"⚠️ **AI System Offline**\n\n🔍 **Αιτία:** `{self.last_error}`\n\nΤο σύστημα προσπάθησε να βρει αυτόματα μοντέλο αλλά απέτυχε."
 
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # --- ΠΡΟΣΩΠΙΚΟΤΗΤΑ & ΟΔΗΓΙΕΣ ---
         system_instruction = f"""
         ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
         CONTEXT INFO: The user may have uploaded manuals or asked about specific files: {context_files}.
         
         INSTRUCTIONS:
         1. **ANALYZE UPLOADS**: If PDF content is provided below, USE IT to answer specifically.
-        2. **STRUCTURE**: Use Bullet Points, Steps (1, 2, 3), and Bold Text. No huge walls of text.
+        2. **STRUCTURE**: Use Bullet Points, Steps (1, 2, 3), and Bold Text.
         3. **DIAGNOSIS**: If an error code is given, explain the Cause and the Solution.
-        4. **MISSING INFO**: If you don't have the manual, warn the user.
-        5. **TONE**: Professional, Technical, Helpful.
+        4. **TONE**: Professional, Technical, Helpful.
         
         LANGUAGE: Answer ONLY in {target_lang}.
         """
@@ -1192,39 +1241,36 @@ class AIEngine:
         try:
             msg_parts = [system_instruction]
             
-            # 1. Προσθήκη Κειμένου από PDF (Η μεγάλη επιστροφή!)
+            # 1. PDF Content
             if pdf_files:
                 pdf_text = self._extract_text_from_pdfs(pdf_files)
                 if pdf_text:
                     msg_parts.append(f"\n[USER UPLOADED MANUAL CONTENT]:\n{pdf_text}\n")
 
-            # 2. Εικόνες
+            # 2. Images
             if images:
                 for img in images:
                     msg_parts.append(img)
                     msg_parts.append("\n[Analyze this image]\n")
 
-            # 3. Ήχος
+            # 3. Audio
             if audio:
                 audio_bytes = audio.getvalue()
                 msg_parts.append({"mime_type": "audio/wav", "data": audio_bytes})
                 msg_parts.append("\n[Listen to this audio]\n")
 
-            # 4. Ερώτηση Χρήστη
+            # 4. Text
             last_msg = next((m['content'] for m in reversed(chat_history) if m['role'] == 'user'), "")
             if last_msg: msg_parts.append(f"Question: {last_msg}")
 
-            # Ρυθμίσεις generation
             gen_config = genai.types.GenerationConfig(temperature=0.3, max_output_tokens=1500)
-
             response = self.model.generate_content(msg_parts, generation_config=gen_config)
             return response.text
             
         except Exception as e:
-            return f"⚠️ AI Error: {str(e)}"
+            return f"⚠️ AI Runtime Error: {str(e)}"
 
     def extract_metadata_from_text(self, text, filename):
-        # Fallback για τον Organizer
         try:
             return self.model.generate_content(f"Classify CATEGORY|BRAND|MODEL|TYPE for: {filename}\n{text[:500]}").text
         except: return "Unsorted|Unknown|Unknown|Manual"
