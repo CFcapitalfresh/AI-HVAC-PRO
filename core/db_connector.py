@@ -1,67 +1,63 @@
-"""
-CORE MODULE: DATABASE CONNECTOR
--------------------------------
-Handles low-level connections to Google Sheets via streamlit-gsheets.
-Implements Singleton pattern principles for efficiency.
-"""
-
 import streamlit as st
-import pandas as pd
 from streamlit_gsheets import GSheetsConnection
-import logging
-
-# Setup Logger
-logger = logging.getLogger("Core.DB")
+import pandas as pd
 
 class DatabaseConnector:
     """
-    Διαχειριστής Συνδέσεων Βάσης Δεδομένων (Google Sheets).
+    Κλάση για τη διαχείριση της σύνδεσης με το Google Sheets.
     """
-    
-    @staticmethod
-    def get_connection():
-        """Returns the raw connection object."""
-        try:
-            return st.connection("gsheets", type=GSheetsConnection)
-        except Exception as e:
-            logger.critical(f"Database Connection Failed: {e}")
-            return None
 
     @staticmethod
-    def fetch_data(sheet_name: str, ttl: int = 0) -> pd.DataFrame:
-        """
-        Ανακτά δεδομένα από ένα συγκεκριμένο φύλλο.
-        Args:
-            sheet_name: Το όνομα του Tab (π.χ. 'Users', 'Clients')
-            ttl: Time To Live cache (0 = πάντα φρέσκα)
-        """
-        conn = DatabaseConnector.get_connection()
-        if not conn:
-            return pd.DataFrame()
+    def _get_conn():
+        """Εσωτερική μέθοδος για τη σύνδεση."""
+        return st.connection("gsheets", type=GSheetsConnection)
 
+    @staticmethod
+    def fetch_data(sheet_name, ttl=0):
+        """
+        Διαβάζει δεδομένα από ένα συγκεκριμένο φύλλο.
+        ttl=0 σημαίνει ότι δεν κρατάει μνήμη cache, διαβάζει πάντα φρέσκα.
+        """
         try:
+            conn = DatabaseConnector._get_conn()
+            # Διαβάζουμε το φύλλο
             df = conn.read(worksheet=sheet_name, ttl=ttl)
-            # Καθαρισμός κενών γραμμών αν υπάρχουν (Robustness)
-            df = df.dropna(how='all')
+            # Καθαρισμός από κενές γραμμές που μπορεί να έχουν μείνει
+            df = df.dropna(how="all")
             return df
         except Exception as e:
-            logger.error(f"Failed to fetch data from '{sheet_name}': {e}")
+            # Αν δεν βρεθεί το φύλλο ή υπάρχει λάθος, επιστρέφει άδειο πίνακα
+            # st.error(f"DB Read Error ({sheet_name}): {e}") # (Προαιρετικό για debugging)
             return pd.DataFrame()
 
     @staticmethod
-    def append_row(sheet_name: str, row_data: pd.DataFrame):
-        """Προσθέτει μια γραμμή στο τέλος του φύλλου."""
-        conn = DatabaseConnector.get_connection()
-        if not conn: return False
-
+    def append_data(sheet_name, row_data):
+        """
+        Προσθέτει μια νέα γραμμή στο τέλος του φύλλου.
+        Το row_data πρέπει να είναι λίστα [val1, val2, ...].
+        """
         try:
-            # 1. Διαβάζουμε τα υπάρχοντα
-            existing_data = conn.read(worksheet=sheet_name, ttl=0)
-            # 2. Ενώνουμε
-            updated_data = pd.concat([existing_data, row_data], ignore_index=True)
-            # 3. Ενημερώνουμε
-            conn.update(worksheet=sheet_name, data=updated_data)
+            conn = DatabaseConnector._get_conn()
+            
+            # 1. Διαβάζουμε τα υπάρχοντα δεδομένα
+            existing_df = conn.read(worksheet=sheet_name, ttl=0)
+            existing_df = existing_df.dropna(how="all")
+            
+            # 2. Ελέγχουμε αν τα στοιχεία ταιριάζουν με τις στήλες
+            if len(row_data) != len(existing_df.columns):
+                st.error(f"Mismatch: Data has {len(row_data)} items, Sheet has {len(existing_df.columns)} columns.")
+                return False
+            
+            # 3. Δημιουργούμε τη νέα γραμμή
+            new_row = pd.DataFrame([row_data], columns=existing_df.columns)
+            
+            # 4. Ενώνουμε τα παλιά με τη νέα γραμμή
+            updated_df = pd.concat([existing_df, new_row], ignore_index=True)
+            
+            # 5. Ενημερώνουμε το Google Sheet
+            conn.update(worksheet=sheet_name, data=updated_df)
             return True
+            
         except Exception as e:
-            logger.error(f"Failed to append row to '{sheet_name}': {e}")
+            st.error(f"DB Write Error ({sheet_name}): {str(e)}")
             return False
