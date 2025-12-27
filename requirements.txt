@@ -7,3 +7,5 @@ google-api-python-client
 st-gsheets-connection
 pypdf
 Pillow
+bcrypt
+openpyxl
