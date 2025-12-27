@@ -1010,15 +1010,17 @@ class ConfigLoader:
 📂 ΑΡΧΕΙΟ: .\core\drive_manager.py
 ==================================================
 """
-CORE MODULE: DRIVE MANAGER (Low Level)
---------------------------------------
+CORE MODULE: DRIVE MANAGER
+--------------------------
 Handles direct API calls to Google Drive v3.
+Includes Upload/Update capabilities for Persistence.
 """
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 import io
+import json
 import logging
 from core.config_loader import ConfigLoader
 
@@ -1026,16 +1028,12 @@ logger = logging.getLogger("Core.Drive")
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 class DriveManager:
-    """Χειριστής Google Drive API."""
-
     def __init__(self):
         self.service = self._authenticate()
 
     def _authenticate(self):
-        """Εσωτερική μέθοδος σύνδεσης."""
         creds_info = ConfigLoader.get_service_account_info()
         if not creds_info: return None
-        
         try:
             creds = service_account.Credentials.from_service_account_info(
                 creds_info, scopes=SCOPES
@@ -1046,9 +1044,7 @@ class DriveManager:
             return None
 
     def list_files_in_folder(self, folder_id):
-        """Επιστρέφει λίστα αρχείων μέσα σε φάκελο."""
         if not self.service: return []
-        
         query = f"'{folder_id}' in parents and trashed = false"
         try:
             results = self.service.files().list(
@@ -1060,43 +1056,27 @@ class DriveManager:
             return []
 
     def create_folder(self, name, parent_id):
-        """Δημιουργεί φάκελο αν δεν υπάρχει."""
         if not self.service: return None
-
-        # 1. Έλεγχος αν υπάρχει ήδη
         query = f"name = '{name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         try:
             existing = self.service.files().list(q=query, fields="files(id)").execute()
             files = existing.get('files', [])
-            if files:
-                return files[0]['id'] # Επιστροφή υπάρχοντος
+            if files: return files[0]['id']
             
-            # 2. Δημιουργία νέου
-            metadata = {
-                'name': name,
-                'mimeType': 'application/vnd.google-apps.folder',
-                'parents': [parent_id]
-            }
+            metadata = {'name': name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_id]}
             folder = self.service.files().create(body=metadata, fields='id').execute()
-            logger.info(f"Created folder: {name}")
             return folder.get('id')
         except Exception as e:
             logger.error(f"Create Folder Error: {e}")
             return None
 
     def move_file(self, file_id, target_folder_id):
-        """Μετακινεί ένα αρχείο σε νέο φάκελο."""
         if not self.service: return False
         try:
-            # Ανάκτηση τωρινών γονέων
             file = self.service.files().get(fileId=file_id, fields='parents').execute()
             previous_parents = ",".join(file.get('parents'))
-            
-            # Μετακίνηση
             self.service.files().update(
-                fileId=file_id,
-                addParents=target_folder_id,
-                removeParents=previous_parents
+                fileId=file_id, addParents=target_folder_id, removeParents=previous_parents
             ).execute()
             return True
         except Exception as e:
@@ -1104,20 +1084,56 @@ class DriveManager:
             return False
 
     def download_file_content(self, file_id):
-        """Κατεβάζει το περιεχόμενο ενός αρχείου (π.χ. PDF) στη μνήμη."""
         if not self.service: return None
         try:
             request = self.service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
             done = False
-            while done is False:
-                status, done = downloader.next_chunk()
+            while done is False: status, done = downloader.next_chunk()
             fh.seek(0)
             return fh
         except Exception as e:
             logger.error(f"Download Error: {e}")
             return None
+
+    # --- ΝΕΕΣ ΛΕΙΤΟΥΡΓΙΕΣ ΓΙΑ CLOUD PERSISTENCE ---
+    def upload_json_file(self, filename, json_data, parent_id):
+        """Ανεβάζει (ή ενημερώνει) ένα αρχείο JSON στο Drive."""
+        if not self.service: return None
+        try:
+            # 1. Έλεγχος αν υπάρχει ήδη το αρχείο
+            query = f"name = '{filename}' and '{parent_id}' in parents and trashed = false"
+            existing = self.service.files().list(q=query, fields="files(id)").execute()
+            files = existing.get('files', [])
+            
+            # Ετοιμασία δεδομένων
+            file_content = json.dumps(json_data, ensure_ascii=False, indent=2)
+            media = MediaIoBaseUpload(io.BytesIO(file_content.encode('utf-8')), mimetype='application/json')
+
+            if files:
+                # UPDATE
+                file_id = files[0]['id']
+                self.service.files().update(fileId=file_id, media_body=media).execute()
+                return file_id
+            else:
+                # CREATE
+                metadata = {'name': filename, 'parents': [parent_id]}
+                new_file = self.service.files().create(body=metadata, media_body=media, fields='id').execute()
+                return new_file.get('id')
+        except Exception as e:
+            logger.error(f"Upload JSON Error: {e}")
+            return None
+
+    def find_file_by_name(self, filename, parent_id):
+        """Βρίσκει ID αρχείου βάσει ονόματος."""
+        if not self.service: return None
+        query = f"name = '{filename}' and '{parent_id}' in parents and trashed = false"
+        try:
+            results = self.service.files().list(q=query, fields="files(id)").execute()
+            files = results.get('files', [])
+            return files[0]['id'] if files else None
+        except: return None
 
 ==================================================
 📂 ΑΡΧΕΙΟ: .\core\ai_engine.py
@@ -1241,36 +1257,25 @@ import json
 import os
 from core.language_pack import get_text
 from core.ai_engine import AIEngine
+from services.sync_service import SyncService # <--- ΝΕΟ IMPORT
 from PIL import Image
-
-def load_cached_library():
-    """Φορτώνει τη βιβλιοθήκη από το αρχείο JSON."""
-    try:
-        if os.path.exists("drive_index.json"):
-            with open("drive_index.json", "r", encoding="utf-8") as f:
-                return json.load(f)
-    except: pass
-    return []
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
-
     st.header(f"{get_text('menu_chat', lang)}")
 
     brain = AIEngine()
     
-    # 1. ΦΟΡΤΩΣΗ ΒΙΒΛΙΟΘΗΚΗΣ
+    # --- SMART LOAD (CLOUD PERSISTENCE) ---
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
-        st.session_state.library_cache = load_cached_library()
+        srv = SyncService()
+        st.session_state.library_cache = srv.load_index()
 
-    # 2. ΑΡΧΙΚΟΠΟΙΗΣΗ ΙΣΤΟΡΙΚΟΥ
+    # Init Session
     if "messages" not in st.session_state: st.session_state.messages = []
-    
-    # 3. ΜΝΗΜΗ "STICKY CONTEXT" (Για να θυμάται το manual στη 2η ερώτηση)
-    if "active_manuals" not in st.session_state:
-        st.session_state.active_manuals = [] 
+    if "active_manuals" not in st.session_state: st.session_state.active_manuals = [] 
 
-    # Εμφάνιση Μηνυμάτων
+    # History
     if not st.session_state.messages:
         st.info(get_text('chat_intro', lang))
 
@@ -1280,39 +1285,27 @@ def render(user):
 
     st.divider()
     
-    # --- ΖΩΝΗ ΠΟΛΥΜΕΣΩΝ (Κάμερα, Μικρόφωνο, Αρχεία) ---
+    # --- MEDIA INPUTS ---
     captured_image = None
     captured_audio = None
     uploaded_files = []
 
     with st.expander(f"📎 {get_text('media_expander', lang)} / Uploads", expanded=False):
-        t1, t2, t3 = st.tabs(["📸 Camera", "🎙️ Voice", "📂 Files (PDF/Img)"])
-        
+        t1, t2, t3 = st.tabs(["📸 Camera", "🎙️ Voice", "📂 Files"])
         with t1:
             img_input = st.camera_input(get_text('camera_label', lang))
-            if img_input:
-                captured_image = Image.open(img_input)
-                st.success("📸 Image Ready!")
+            if img_input: captured_image = Image.open(img_input)
         with t2:
             audio_val = st.audio_input(get_text('audio_label', lang))
-            if audio_val:
-                captured_audio = audio_val
-                st.success("🎙️ Audio Recorded!")
+            if audio_val: captured_audio = audio_val
         with t3:
             uploaded_files = st.file_uploader("Manuals/Photos", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
-            if uploaded_files: st.success(f"📎 {len(uploaded_files)} files.")
 
-    # --- INPUT AREA ---
-    prompt_placeholder = get_text('chat_placeholder', lang)
-    if captured_audio or captured_image or uploaded_files:
-        prompt_placeholder = "Press Enter to send..."
-
-    prompt = st.chat_input(prompt_placeholder)
+    # --- INPUT & LOGIC ---
+    prompt = st.chat_input(get_text('chat_placeholder', lang))
     
     if prompt or captured_audio or captured_image or uploaded_files:
-        
         final_prompt = prompt if prompt else "(Sent Media)"
-
         st.session_state.messages.append({"role": "user", "content": final_prompt})
         with st.chat_message("user"): 
             st.markdown(final_prompt)
@@ -1321,84 +1314,52 @@ def render(user):
             if uploaded_files: 
                 for f in uploaded_files: st.caption(f"📎 {f.name}")
 
-        # ---------------------------------------------------------
-        # 🟢 ΒΕΛΤΙΩΣΗ: RANKING SYSTEM (Βαθμολογία Ταιριάσματος)
-        # ---------------------------------------------------------
+        # --- RANKING SYSTEM ---
         found_files_names = ""
-        
         if prompt:
-            # Αφαίρεση κοινών λέξεων (Stopwords) για να εστιάσουμε στο μοντέλο
-            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the", "in", "on"]
-            raw_keywords = prompt.lower().split()
-            keywords = [w for w in raw_keywords if w not in stopwords and len(w) > 1]
+            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem"]
+            keywords = [w for w in prompt.lower().split() if w not in stopwords and len(w) > 1]
             
             library = st.session_state.library_cache
-            scored_results = [] # Λίστα μορφής: (Score, Item)
+            scored_results = []
             
             if library:
                 for item in library:
-                    # Ενώνουμε όνομα και metadata
-                    target_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
-                    
-                    matches = 0
-                    for word in keywords:
-                        if word in target_text:
-                            matches += 1
-                    
-                    # Αν έχει έστω και ένα σημαντικό ταίριασμα
-                    if matches > 0:
-                        scored_results.append((matches, item))
+                    target = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
+                    matches = sum(1 for w in keywords if w in target)
+                    if matches > 0: scored_results.append((matches, item))
             
-            # Ταξινόμηση: Πρώτα αυτά με τα περισσότερα matches (π.χ. 4/4)
             scored_results.sort(key=lambda x: x[0], reverse=True)
-            
-            # Παίρνουμε τα top 3
             top_matches = [item for score, item in scored_results[:3]]
 
-            # 🟢 ΛΟΓΙΚΗ STICKY MEMORY
-            if top_matches:
-                # Βρήκαμε νέα; Ανανεώνουμε τη μνήμη.
-                st.session_state.active_manuals = top_matches
-            else:
-                # Δεν βρήκαμε; Κρατάμε τα παλιά (δεν κάνουμε τίποτα).
-                pass
+            if top_matches: st.session_state.active_manuals = top_matches
             
             found_files_names = ", ".join([f['name'] for f in st.session_state.active_manuals])
-
-        # ---------------------------------------------------------
 
         # --- AI GENERATION ---
         with st.chat_message("assistant"):
             with st.spinner(get_text('chat_thinking', lang)):
-                images_to_send = [captured_image] if captured_image else []
-                pdfs_to_process = []
+                imgs = [captured_image] if captured_image else []
+                pdfs = [f for f in uploaded_files if f.type == "application/pdf"]
                 for f in uploaded_files:
-                    if f.type == "application/pdf": pdfs_to_process.append(f)
-                    elif f.type.startswith("image/"): images_to_send.append(Image.open(f))
+                     if f.type.startswith("image/"): imgs.append(Image.open(f))
 
-                response_text = brain.get_chat_response(
+                resp = brain.get_chat_response(
                     st.session_state.messages, 
-                    context_files=found_files_names, # Στέλνουμε τα "Persistent" manuals
+                    context_files=found_files_names, 
                     lang=lang,
-                    images=images_to_send,
-                    audio=captured_audio,
-                    pdf_files=pdfs_to_process
+                    images=imgs, audio=captured_audio, pdf_files=pdfs
                 )
-                st.markdown(response_text)
+                st.markdown(resp)
                 
-                # Εμφάνιση των Manuals που "βλέπει" το AI
                 if st.session_state.active_manuals:
-                    with st.expander("📚 Active Context (Manuals Used)"):
+                    with st.expander("📚 Active Context"):
                         for f in st.session_state.active_manuals:
-                            link = f.get('link') or f.get('webViewLink')
-                            if link: st.markdown(f"📄 **[{f['name']}]({link})**")
+                            l = f.get('link') or f.get('webViewLink')
+                            if l: st.markdown(f"📄 **[{f['name']}]({l})**")
                             else: st.markdown(f"📄 **{f['name']}**")
 
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": response_text, 
-            "sources": st.session_state.active_manuals 
-        })
+        st.session_state.messages.append({"role": "assistant", "content": resp})
 
 ==================================================
 📂 ΑΡΧΕΙΟ: .\modules\ui_organizer.py
@@ -1437,90 +1398,55 @@ def render(user):
 📂 ΑΡΧΕΙΟ: .\modules\ui_search.py
 ==================================================
 import streamlit as st
-import json  # <--- ΑΠΑΡΑΙΤΗΤΟ για την αποθήκευση
-import os    # <--- ΑΠΑΡΑΙΤΗΤΟ για έλεγχο αρχείων
 from services.sync_service import SyncService
 from core.language_pack import get_text
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
+    srv = SyncService()
     
     st.header(get_text('menu_library', lang))
     
-    # --- ΚΟΥΜΠΙ ΣΥΓΧΡΟΝΙΣΜΟΥ ---
+    # --- SYNC BUTTON ---
     if st.button("🔄 Sync Library / Ανανέωση Βιβλιοθήκης", use_container_width=True):
-        with st.spinner("⏳ Γίνεται σάρωση του Google Drive (Scanning)..."):
+        with st.spinner("⏳ Σάρωση Drive & Upload Index στο Cloud..."):
             try:
-                srv = SyncService()
-                # 1. Σάρωση από το Drive
-                data = srv.scan_library()
-                
-                # 2. Ενημέρωση της Μνήμης (Session State)
+                data = srv.scan_library() # Αυτό τώρα σώζει και στο Cloud
                 st.session_state.library_cache = data
-                
-                # 3. ΑΠΟΘΗΚΕΥΣΗ ΣΤΟ ΔΙΣΚΟ (Η ΔΙΟΡΘΩΣΗ)
-                # Αυτό δημιουργεί το αρχείο που ψάχνει το Chat
-                with open("drive_index.json", "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                
-                st.success(f"✅ Ολοκληρώθηκε! Αποθηκεύτηκαν {len(data)} αρχεία στο 'drive_index.json'.")
-                
+                st.success(f"✅ Ολοκληρώθηκε! Index saved to Cloud. ({len(data)} files)")
             except Exception as e:
-                st.error(f"❌ Σφάλμα Συγχρονισμού: {e}")
+                st.error(f"❌ Error: {e}")
 
     st.divider()
 
-    # --- ΛΟΓΙΚΗ ΦΟΡΤΩΣΗΣ (PERSISTENCE) ---
-    # Αν η μνήμη είναι άδεια, προσπαθούμε να φορτώσουμε από το αρχείο
+    # --- SMART LOAD ---
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
-        if os.path.exists("drive_index.json"):
-            try:
-                with open("drive_index.json", "r", encoding="utf-8") as f:
-                    st.session_state.library_cache = json.load(f)
-            except:
-                pass # Αν αποτύχει, θα μείνει κενό
+        with st.spinner("☁️ Φόρτωση Βιβλιοθήκης..."):
+            st.session_state.library_cache = srv.load_index()
 
-    # Παίρνουμε τα δεδομένα (είτε από το Sync που μόλις έγινε, είτε από το αρχείο)
     data = st.session_state.get('library_cache', [])
     
-    # Αν ακόμα είναι κενό, σημαίνει ότι δεν έχει γίνει ποτέ Sync
     if not data:
-        st.info("ℹ️ Η βιβλιοθήκη είναι κενή. Πατήστε το κουμπί 'Sync Library' για να δημιουργήσετε το ευρετήριο.")
+        st.info("ℹ️ Η βιβλιοθήκη είναι κενή. Πατήστε 'Sync' για αρχικοποίηση.")
     
-    # --- UI ΑΝΑΖΗΤΗΣΗΣ ---
-    query = st.text_input("🔎 Αναζήτηση Manual (Μάρκα, Μοντέλο, Κωδικός)...", placeholder="π.χ. Ariston Clas One").lower()
+    # --- SEARCH UI ---
+    query = st.text_input("🔎 Αναζήτηση Manual...", placeholder="Model, Code...").lower()
     
     if query:
-        results = []
-        for d in data:
-            # Ψάχνουμε στο όνομα ΚΑΙ στα metadata
-            searchable_text = (d.get('name', '') + " " + d.get('search_terms', '')).lower()
-            if query in searchable_text:
-                results.append(d)
-
+        results = [d for d in data if query in (d.get('name', '') + " " + d.get('search_terms', '')).lower()]
         if results:
-            st.success(f"Βρέθηκαν {len(results)} έγγραφα:")
+            st.success(f"Βρέθηκαν {len(results)}:")
             for res in results:
                 with st.container(border=True):
                     c1, c2 = st.columns([3, 1])
-                    with c1:
-                        st.write(f"📄 **{res['name']}**")
-                        # Προαιρετικά δείχνουμε και το μοντέλο αν υπάρχει στα metadata
-                        if 'real_model' in res:
-                            st.caption(f"Model: {res['real_model']}")
-                    with c2:
-                        link = res.get('link') or res.get('webViewLink')
-                        if link:
-                            st.link_button("📂 Άνοιγμα", link, use_container_width=True)
-                        else:
-                            st.warning("No Link")
+                    c1.write(f"📄 **{res['name']}**")
+                    link = res.get('link') or res.get('webViewLink')
+                    if link: c2.link_button("📂 Open", link, use_container_width=True)
         else:
             st.warning("Δεν βρέθηκαν αποτελέσματα.")
-            
     elif data:
-        # Αν δεν ψάχνει κάτι, δείχνουμε σύνοψη
-        st.caption(f"Σύνολο αρχείων στη βάση: {len(data)}")
-        with st.expander("📂 Προβολή όλων των αρχείων"):
+        st.caption(f"Σύνολο: {len(data)} αρχεία")
+        with st.expander("📂 Προβολή Όλων"):
             st.dataframe(data)
 
 ==================================================
@@ -1879,16 +1805,19 @@ def render(user):
 📂 ΑΡΧΕΙΟ: .\services\sync_service.py
 ==================================================
 """
-SERVICE: SYNC SERVICE
----------------------
-Scans Google Drive recursively and builds the library index.
+SERVICE: SYNC SERVICE (CLOUD ENHANCED)
+--------------------------------------
+Scans Google Drive and syncs index to Cloud for persistence.
 """
 import streamlit as st
+import json
+import os
 from core.drive_manager import DriveManager
 from core.config_loader import ConfigLoader
 import logging
 
 logger = logging.getLogger("Service.Sync")
+INDEX_FILENAME = "drive_index.json"
 
 class SyncService:
     def __init__(self):
@@ -1896,14 +1825,14 @@ class SyncService:
         self.root_id = ConfigLoader.get_drive_folder_id()
 
     def scan_library(self):
-        """Σαρώνει όλο το Drive και επιστρέφει λίστα αρχείων (Metadata)."""
+        """Σαρώνει το Drive, φτιάχνει index και το σώζει ΤΟΠΙΚΑ και στο CLOUD."""
         if not self.root_id: return []
         
+        # 1. Σάρωση (υπάρχων κώδικας)
         all_files = []
         folders_to_scan = [self.root_id]
         scanned_folders = set()
 
-        # Iterative scanning (για να μην κολλήσει σε recursive loop)
         while folders_to_scan:
             current_id = folders_to_scan.pop(0)
             if current_id in scanned_folders: continue
@@ -1915,16 +1844,50 @@ class SyncService:
                 if item['mimeType'] == 'application/vnd.google-apps.folder':
                     folders_to_scan.append(item['id'])
                 elif item['mimeType'] == 'application/pdf':
-                    # Εξαγωγή Metadata από το όνομα
-                    # Υποθέτουμε ότι ο Organizer τα έχει ονομάσει σωστά ή είναι σε φακέλους
                     meta = self._parse_metadata(item)
                     all_files.append(meta)
         
+        # 2. Αποθήκευση Τοπικά (Backup)
+        try:
+            with open(INDEX_FILENAME, "w", encoding="utf-8") as f:
+                json.dump(all_files, f, ensure_ascii=False, indent=2)
+        except: pass
+
+        # 3. Αποθήκευση στο Cloud (Persistence)
+        try:
+            self.drive.upload_json_file(INDEX_FILENAME, all_files, self.root_id)
+        except Exception as e:
+            logger.error(f"Cloud Save Failed: {e}")
+
         return all_files
 
+    def load_index(self):
+        """Προσπαθεί να φορτώσει το Index (Μνήμη -> Τοπικά -> Cloud)."""
+        
+        # A. Τοπικό Αρχείο
+        if os.path.exists(INDEX_FILENAME):
+            try:
+                with open(INDEX_FILENAME, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except: pass
+        
+        # B. Αν δεν υπάρχει τοπικά, ψάξε στο Cloud (Drive)
+        if self.root_id:
+            cloud_id = self.drive.find_file_by_name(INDEX_FILENAME, self.root_id)
+            if cloud_id:
+                stream = self.drive.download_file_content(cloud_id)
+                if stream:
+                    try:
+                        data = json.load(stream)
+                        # Σώσε το και τοπικά για την επόμενη φορά
+                        with open(INDEX_FILENAME, "w", encoding="utf-8") as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        return data
+                    except: pass
+        
+        return []
+
     def _parse_metadata(self, item):
-        """Εξάγει πληροφορίες από το αρχείο."""
-        # Εδώ θα μπορούσαμε να πάρουμε και το path των γονέων για να βρούμε μάρκα
         return {
             'file_id': item['id'],
             'name': item['name'],
@@ -2103,15 +2066,16 @@ class SorterService:
 📂 ΑΡΧΕΙΟ: .\services\diagnostics_logic.py
 ==================================================
 """
-SERVICE: DIAGNOSTICS LOGIC
---------------------------
+SERVICE: DIAGNOSTICS LOGIC (ROBUST & DEBUG VERSION)
+---------------------------------------------------
 Description: Specialized AI service that generates step-by-step 
-diagnostic checklists in structured JSON format.
+diagnostic checklists. Includes advanced JSON parsing and error reporting.
 """
 
 import google.generativeai as genai
 import json
 import logging
+import streamlit as st  # <--- Προσθήκη για να δείχνουμε τα σφάλματα στην οθόνη
 from core.config_loader import ConfigLoader
 
 logger = logging.getLogger("Service.Diagnostics")
@@ -2124,13 +2088,19 @@ class DiagnosticsService:
 
     def _setup(self):
         if self.api_key:
-            genai.configure(api_key=self.api_key)
-            # Χρησιμοποιούμε το flash για ταχύτητα
-            self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+            try:
+                genai.configure(api_key=self.api_key)
+                self.model = genai.GenerativeModel('models/gemini-1.5-flash')
+            except Exception as e:
+                st.error(f"⚠️ AI Configuration Error: {e}")
+        else:
+            st.error("❌ API Key Missing! Ελέγξτε το αρχείο secrets.toml.")
 
     def generate_checklist(self, error_code, manual_text=""):
         """Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON."""
-        if not self.model: return None
+        if not self.model: 
+            st.error("❌ Το AI Model δεν έχει αρχικοποιηθεί (Model is None).")
+            return None
 
         prompt = f"""
         ROLE: You are an Expert HVAC Field Technician.
@@ -2165,19 +2135,32 @@ class DiagnosticsService:
         """
         
         try:
+            # Ζητάμε JSON response
             response = self.model.generate_content(
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
             
-            clean_json = response.text.strip()
-            if clean_json.startswith("```json"):
-                clean_json = clean_json[7:-3]
-            elif clean_json.startswith("```"):
-                clean_json = clean_json[3:-3]
-                
-            return json.loads(clean_json)
+            text = response.text.strip()
             
+            # --- ΠΡΟΗΓΜΕΝΟΣ ΚΑΘΑΡΙΣΜΟΣ JSON ---
+            # Βρίσκουμε την πρώτη αγκύλη '{' και την τελευταία '}'
+            start_idx = text.find('{')
+            end_idx = text.rfind('}') + 1
+            
+            if start_idx != -1 and end_idx != -1:
+                clean_json = text[start_idx:end_idx]
+                return json.loads(clean_json)
+            else:
+                # Αν αποτύχει, δείχνουμε τι έστειλε το AI για να καταλάβουμε
+                st.warning(f"⚠️ Το AI επέστρεψε μη έγκυρη μορφή: {text[:100]}...")
+                return None
+            
+        except json.JSONDecodeError as e:
+            st.error(f"❌ JSON Error: Δεν μπορώ να διαβάσω την απάντηση του AI. ({e})")
+            return None
         except Exception as e:
-            logger.error(f"Diagnostics JSON Error: {e}")
+            # Εμφάνιση του πραγματικού σφάλματος στην οθόνη
+            st.error(f"❌ System Error: {str(e)}")
+            logger.error(f"Diagnostics Error: {e}")
             return None
