@@ -1,11 +1,3 @@
-"""
-CORE MODULE: AI ENGINE (BRAIN) - REAL AUTO-DISCOVERY
-----------------------------------------------------
-Features:
-- Queries Google API for available models.
-- Forces Citation of Sources.
-"""
-
 import google.generativeai as genai
 import logging
 import pypdf
@@ -78,7 +70,6 @@ class AIEngine:
 
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
         
-        # --- ΑΥΣΤΗΡΟ ΠΡΩΤΟΚΟΛΛΟ ΠΗΓΩΝ ---
         system_instruction = f"""
         ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
         
@@ -86,8 +77,8 @@ class AIEngine:
         
         INSTRUCTIONS:
         1. **CITATION IS MANDATORY**: 
-           - If the answer is based on a specific manual from 'CONTEXT DATA' or a 'USER UPLOADED FILE', start with: "📖 **Source:** [Exact Filename]"
-           - If the manual is NOT in the data, start with: "⚠️ **Source:** General Knowledge (Manual not found)"
+           - If the answer is based on a specific manual from 'CONTEXT DATA' or a 'USER UPLOADED FILE', start with: "📖 **Πηγή / Source:** [Exact Filename]"
+           - If the manual is NOT in the data, start with: "⚠️ **Πηγή / Source:** Γενική Γνώση / General Knowledge (Manual not found)"
         
         2. **DIAGNOSIS**: If an error code is given, explain Cause & Solution steps clearly.
         3. **FORMAT**: Use bold keys, bullet points, and numbered lists.

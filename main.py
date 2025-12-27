@@ -1,7 +1,8 @@
 import streamlit as st
 from core.auth_manager import AuthManager
 from core.language_pack import get_text
-from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools
+# ΠΡΟΣΘΗΚΗ: ui_search για τη Βιβλιοθήκη
+from modules import ui_chat, ui_admin_panel, ui_clients, ui_dashboard, ui_organizer, ui_tools, ui_search
 
 st.set_page_config(page_title="Mastro Nek AI", page_icon="🤖", layout="wide")
 
@@ -60,7 +61,6 @@ def main():
         st.caption(f"Role: {role.upper()}")
         st.divider()
         
-        # Γλώσσα
         l_sel = st.radio("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, horizontal=True)
         new_lang = 'gr' if l_sel == "Ελληνικά" else 'en'
         if new_lang != lang:
@@ -69,10 +69,11 @@ def main():
 
         st.divider()
         
-        # Menu
+        # Menu (Πλήρες)
         opts = {
             get_text('menu_dashboard', new_lang): "dash",
             get_text('menu_chat', new_lang): "chat",
+            get_text('menu_library', new_lang): "lib", # <--- Η Βιβλιοθήκη!
             get_text('menu_clients', new_lang): "clients",
             get_text('menu_organizer', new_lang): "org",
             get_text('menu_tools', new_lang): "tools"
@@ -80,12 +81,23 @@ def main():
         if role == 'admin':
             opts[get_text('menu_admin', new_lang)] = "admin"
 
-        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()))
+        # Auto-Routing από Dashboard
+        default_idx = 0
+        if 'app_mode' in st.session_state:
+            try:
+                target = st.session_state.app_mode
+                if target == 'library': target = 'lib'
+                vals = list(opts.values())
+                if target in vals:
+                    default_idx = vals.index(target)
+            except: pass
+            del st.session_state.app_mode
+
+        selection_label = st.radio(get_text('menu_header', new_lang), list(opts.keys()), index=default_idx)
         selection_code = opts[selection_label]
         
         st.divider()
         
-        # ΚΟΥΜΠΙ ΝΕΑ ΣΥΝΟΜΙΛΙΑ (ΣΤΟ SIDEBAR)
         if selection_code == "chat":
             if st.button(f"➕ {get_text('new_chat_side', new_lang)}", type="primary", use_container_width=True):
                 st.session_state.messages = []
@@ -97,6 +109,7 @@ def main():
     # ROUTING
     if selection_code == "dash": ui_dashboard.render(user)
     elif selection_code == "chat": ui_chat.render(user)
+    elif selection_code == "lib": ui_search.render(user) # <--- Σύνδεση
     elif selection_code == "clients": ui_clients.render(user)
     elif selection_code == "org": ui_organizer.render(user)
     elif selection_code == "tools": ui_tools.render(user)

@@ -6,7 +6,7 @@ from core.ai_engine import AIEngine
 from PIL import Image
 
 def load_cached_library():
-    """Φορτώνει τη βιβλιοθήκη από το αρχείο JSON (γρήγορα)."""
+    """Φορτώνει τη βιβλιοθήκη από το αρχείο JSON για ταχύτητα."""
     try:
         if os.path.exists("drive_index.json"):
             with open("drive_index.json", "r", encoding="utf-8") as f:
@@ -21,13 +21,12 @@ def render(user):
 
     brain = AIEngine()
     
-    # ΔΙΟΡΘΩΣΗ: Φόρτωση δεδομένων από το JSON αν η μνήμη είναι άδεια
+    # ΦΟΡΤΩΣΗ ΔΕΔΟΜΕΝΩΝ (Το σημαντικό fix)
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
         st.session_state.library_cache = load_cached_library()
 
     if "messages" not in st.session_state: st.session_state.messages = []
     
-    # Εμφάνιση Ιστορικού
     if not st.session_state.messages:
         st.info(get_text('chat_intro', lang))
 
@@ -35,8 +34,9 @@ def render(user):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # --- ΖΩΝΗ ΠΟΛΥΜΕΣΩΝ & ΑΡΧΕΙΩΝ ---
     st.divider()
+    
+    # --- MULTIMEDIA ---
     captured_image = None
     captured_audio = None
     uploaded_files = []
@@ -49,23 +49,16 @@ def render(user):
             if img_input:
                 captured_image = Image.open(img_input)
                 st.success("📸 Image Ready!")
-        
         with t2:
             audio_val = st.audio_input(get_text('audio_label', lang))
             if audio_val:
                 captured_audio = audio_val
                 st.success("🎙️ Audio Recorded!")
-
         with t3:
-            uploaded_files = st.file_uploader(
-                "Manuals (PDF) / Photos", 
-                type=['pdf', 'png', 'jpg', 'jpeg'], 
-                accept_multiple_files=True
-            )
-            if uploaded_files:
-                st.success(f"📎 {len(uploaded_files)} files ready.")
+            uploaded_files = st.file_uploader("Manuals/Photos", type=['pdf', 'png', 'jpg', 'jpeg'], accept_multiple_files=True)
+            if uploaded_files: st.success(f"📎 {len(uploaded_files)} files.")
 
-    # --- INPUT AREA ---
+    # --- INPUT ---
     prompt_placeholder = get_text('chat_placeholder', lang)
     if captured_audio or captured_image or uploaded_files:
         prompt_placeholder = "Press Enter to send..."
@@ -73,10 +66,8 @@ def render(user):
     prompt = st.chat_input(prompt_placeholder)
     
     if prompt or captured_audio or captured_image or uploaded_files:
-        
         final_prompt = prompt if prompt else "(Sent Media)"
 
-        # 1. User Message
         st.session_state.messages.append({"role": "user", "content": final_prompt})
         with st.chat_message("user"): 
             st.markdown(final_prompt)
@@ -85,31 +76,28 @@ def render(user):
             if uploaded_files: 
                 for f in uploaded_files: st.caption(f"📎 {f.name}")
 
-        # 2. Context Logic (Εύρεση Manuals)
-        # Τώρα που έχουμε τη λίστα, αυτό θα λειτουργήσει!
+        # --- CONTEXT MATCHING ---
         found_files_names = ""
         relevant_files = []
         
         if prompt:
             keywords = prompt.lower().split()
-            library = st.session_state.library_cache # Τώρα δεν είναι κενό!
+            library = st.session_state.library_cache
             found = []
             
             if library:
                 for item in library:
-                    # Απλή αναζήτηση keyword στο όνομα ή στα search_terms
-                    searchable = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
-                    if sum(1 for w in keywords if w in searchable and len(w) > 2) >= 1:
+                    # Ψάχνουμε στα πεδία που σώσαμε στο sync
+                    s_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
+                    if sum(1 for w in keywords if w in s_text and len(w) > 2) >= 1:
                         found.append(item)
             
-            relevant_files = found[:3] # Κρατάμε τα 3 καλύτερα
-            # Στέλνουμε τα ονόματα στο AI για να ξέρει τι βρήκαμε
+            relevant_files = found[:3]
             found_files_names = ", ".join([f['name'] for f in relevant_files])
 
-        # 3. AI Response
+        # --- AI CALL ---
         with st.chat_message("assistant"):
             with st.spinner(get_text('chat_thinking', lang)):
-                
                 images_to_send = [captured_image] if captured_image else []
                 pdfs_to_process = []
                 for f in uploaded_files:
@@ -118,7 +106,7 @@ def render(user):
 
                 response_text = brain.get_chat_response(
                     st.session_state.messages, 
-                    context_files=found_files_names, # Τώρα θα έχει τιμές!
+                    context_files=found_files_names, 
                     lang=lang,
                     images=images_to_send,
                     audio=captured_audio,
@@ -126,7 +114,6 @@ def render(user):
                 )
                 st.markdown(response_text)
                 
-                # Δείχνουμε τα manuals που χρησιμοποιήθηκαν
                 if relevant_files:
                     with st.expander("📚 Related Manuals found in Library"):
                         for f in relevant_files:
@@ -135,7 +122,5 @@ def render(user):
                             else: st.markdown(f"📄 **{f['name']}**")
 
         st.session_state.messages.append({
-            "role": "assistant", 
-            "content": response_text,
-            "sources": relevant_files 
+            "role": "assistant", "content": response_text, "sources": relevant_files 
         })
