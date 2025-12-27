@@ -21,19 +21,18 @@ def render(user):
 
     brain = AIEngine()
     
-    # 1. ΦΟΡΤΩΣΗ ΒΙΒΛΙΟΘΗΚΗΣ (Αν είναι άδεια, προσπάθεια φόρτωσης)
+    # 1. ΦΟΡΤΩΣΗ ΒΙΒΛΙΟΘΗΚΗΣ
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
         st.session_state.library_cache = load_cached_library()
 
-    # 2. ΑΡΧΙΚΟΠΟΙΗΣΗ ΜΝΗΜΗΣ ΣΥΝΟΜΙΛΙΑΣ
+    # 2. ΑΡΧΙΚΟΠΟΙΗΣΗ ΙΣΤΟΡΙΚΟΥ
     if "messages" not in st.session_state: st.session_state.messages = []
     
-    # --- ΝΕΟ: ΜΕΤΑΒΛΗΤΗ ΓΙΑ ΝΑ ΘΥΜΑΤΑΙ ΤΟ MANUAL (Sticky Context) ---
-    # Αυτό λύνει το πρόβλημα που ξεχνάει το μοντέλο στη 2η ερώτηση
+    # 3. ΜΝΗΜΗ "STICKY CONTEXT" (Για να θυμάται το manual στη 2η ερώτηση)
     if "active_manuals" not in st.session_state:
         st.session_state.active_manuals = [] 
 
-    # Εμφάνιση Ιστορικού
+    # Εμφάνιση Μηνυμάτων
     if not st.session_state.messages:
         st.info(get_text('chat_intro', lang))
 
@@ -43,7 +42,7 @@ def render(user):
 
     st.divider()
     
-    # --- MULTIMEDIA INPUTS (Διατηρούνται ΟΛΑ) ---
+    # --- ΖΩΝΗ ΠΟΛΥΜΕΣΩΝ (Κάμερα, Μικρόφωνο, Αρχεία) ---
     captured_image = None
     captured_audio = None
     uploaded_files = []
@@ -76,7 +75,6 @@ def render(user):
         
         final_prompt = prompt if prompt else "(Sent Media)"
 
-        # Εμφάνιση μηνύματος χρήστη
         st.session_state.messages.append({"role": "user", "content": final_prompt})
         with st.chat_message("user"): 
             st.markdown(final_prompt)
@@ -86,47 +84,47 @@ def render(user):
                 for f in uploaded_files: st.caption(f"📎 {f.name}")
 
         # ---------------------------------------------------------
-        # 🟢 ΒΕΛΤΙΩΣΗ: RANKING SYSTEM & STICKY MEMORY
+        # 🟢 ΒΕΛΤΙΩΣΗ: RANKING SYSTEM (Βαθμολογία Ταιριάσματος)
         # ---------------------------------------------------------
         found_files_names = ""
         
         if prompt:
-            keywords = prompt.lower().split()
+            # Αφαίρεση κοινών λέξεων (Stopwords) για καλύτερη στόχευση
+            stopwords = ["και", "το", "τη", "με", "για", "error", "βλαβη", "code", "problem", "not", "working", "σφαλμα", "of", "the"]
+            raw_keywords = prompt.lower().split()
+            keywords = [w for w in raw_keywords if w not in stopwords and len(w) > 1]
+            
             library = st.session_state.library_cache
-            scored_results = [] # Λίστα με (Score, Item)
+            scored_results = [] # Λίστα μορφής: (Score, Item)
             
             if library:
                 for item in library:
-                    # Ενώνουμε όνομα και metadata για αναζήτηση
-                    s_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
+                    # Ενώνουμε όνομα και metadata
+                    target_text = (item.get('name', '') + " " + item.get('search_terms', '')).lower()
                     
-                    # Υπολογισμός Σκορ: Πόσες λέξεις ταιριάζουν;
-                    score = 0
+                    matches = 0
                     for word in keywords:
-                        if len(word) > 2 and word in s_text:
-                            score += 1
+                        if word in target_text:
+                            matches += 1
                     
-                    # Αν βρέθηκε έστω μία σημαντική λέξη
-                    if score > 0:
-                        scored_results.append((score, item))
+                    # Αν έχει έστω και ένα σημαντικό ταίριασμα
+                    if matches > 0:
+                        scored_results.append((matches, item))
             
-            # Ταξινόμηση: Πρώτα αυτά με τους περισσότερους πόντους (Score)
-            # Έτσι το "Next Evo X" (3 πόντοι) κερδίζει το "Next Evo" (2 πόντοι)
+            # Ταξινόμηση: Πρώτα αυτά με τα περισσότερα matches (π.χ. 4/4)
             scored_results.sort(key=lambda x: x[0], reverse=True)
             
             # Παίρνουμε τα top 3
             top_matches = [item for score, item in scored_results[:3]]
 
-            # 🟢 ΛΟΓΙΚΗ ΜΝΗΜΗΣ:
+            # 🟢 ΛΟΓΙΚΗ STICKY MEMORY
             if top_matches:
-                # Αν βρήκαμε ΝΕΑ manuals, ανανεώνουμε τη μνήμη
+                # Βρήκαμε νέα; Ανανεώνουμε τη μνήμη.
                 st.session_state.active_manuals = top_matches
             else:
-                # Αν ΔΕΝ βρήκαμε (π.χ. έγραψε "δεν βγάζει error"), ΚΡΑΤΑΜΕ ΤΑ ΠΑΛΙΑ!
-                # Δεν πειράζουμε το st.session_state.active_manuals
+                # Δεν βρήκαμε; Κρατάμε τα παλιά (δεν κάνουμε τίποτα).
                 pass
             
-            # Ετοιμασία λίστας ονομάτων για το AI
             found_files_names = ", ".join([f['name'] for f in st.session_state.active_manuals])
 
         # ---------------------------------------------------------
@@ -150,9 +148,9 @@ def render(user):
                 )
                 st.markdown(response_text)
                 
-                # Εμφάνιση των Ενεργών Manuals (για να ξέρεις τι διαβάζει)
+                # Εμφάνιση των Manuals που "βλέπει" το AI
                 if st.session_state.active_manuals:
-                    with st.expander("📚 Active Manuals (Context)"):
+                    with st.expander("📚 Active Context (Manuals Used)"):
                         for f in st.session_state.active_manuals:
                             link = f.get('link') or f.get('webViewLink')
                             if link: st.markdown(f"📄 **[{f['name']}]({link})**")
