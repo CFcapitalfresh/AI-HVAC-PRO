@@ -6,62 +6,86 @@ from datetime import datetime
 class AuthManager:
     @staticmethod
     def verify_login(email, password):
+        """
+        Ελέγχει τα στοιχεία εισόδου.
+        Περιλαμβάνει καθαρισμό (trim) για κινητά.
+        """
         # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT (Αυτό λύνει το πρόβλημα του κινητού)
         # Σβήνει κενά (space) από την αρχή και το τέλος
         # Μετατρέπει τα κεφαλαία σε μικρά για το email
-        email = email.strip().lower()  
-        password = password.strip()
+        if email:
+            email = email.strip().lower()
+        else:
+            return None, "Email required"
+            
+        if password:
+            password = password.strip()
+        else:
+            return None, "Password required"
 
+        # 2. ΛΗΨΗ ΧΡΗΣΤΩΝ ΑΠΟ ΤΗ ΒΑΣΗ
         users = DatabaseConnector.fetch_data("Users")
-        if users.empty: return None, "No users found"
+        if users.empty: 
+            return None, "No users found in database"
 
-        # Αναζήτηση χρήστη
+        # 3. ΑΝΑΖΗΤΗΣΗ ΧΡΗΣΤΗ
         user = users[users['email'] == email]
         
-        if user.empty: return None, "User not found"
+        if user.empty: 
+            return None, "User not found"
         
         user_data = user.iloc[0]
         stored_hash = user_data['password_hash']
         
-        # Έλεγχος Κωδικού
+        # 4. ΕΛΕΓΧΟΣ ΚΩΔΙΚΟΥ
         try:
-            # Περίπτωση 1: Παλιός κωδικός (απλό κείμενο)
+            # Περίπτωση Α: Παλιός κωδικός (απλό κείμενο - Legacy)
             if not stored_hash.startswith('$2b$'):
                 if stored_hash == password:
-                    return user_data.to_dict(), "OK"
+                    # Αν είναι σωστός, ελέγχουμε αν είναι Active
+                    if user_data['role'] == 'active' or user_data['role'] == 'admin':
+                        return user_data.to_dict(), "OK"
+                    else:
+                        return None, "Account Pending Approval"
                 else:
                     return None, "Wrong password"
             
-            # Περίπτωση 2: Νέος ασφαλής κωδικός (Hash)
+            # Περίπτωση Β: Νέος ασφαλής κωδικός (Hash - Bcrypt)
             if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
-                # Έλεγχος αν ο χρήστης είναι ενεργός
+                # Έλεγχος ρόλου (Active ή Admin)
                 if user_data['role'] == 'active' or user_data['role'] == 'admin':
                     return user_data.to_dict(), "OK"
                 else:
                     return None, "Account Pending Approval" # Περιμένει έγκριση
             else:
                 return None, "Wrong password"
-        except:
-            return None, "Auth Error"
+        except Exception as e:
+            return None, f"Auth Error: {str(e)}"
 
     @staticmethod
     def register_new_user(email, name, password):
+        """
+        Εγγράφει νέο χρήστη ως 'pending'.
+        """
         # 1. ΚΑΘΑΡΙΣΜΟΣ INPUT
-        email = email.strip().lower()
-        name = name.strip()
-        password = password.strip()
+        if email: email = email.strip().lower()
+        if name: name = name.strip()
+        if password: password = password.strip()
 
-        # Έλεγχος αν υπάρχει ήδη το email
+        if not email or not password:
+            return False
+
+        # 2. ΕΛΕΓΧΟΣ ΑΝ ΥΠΑΡΧΕΙ ΗΔΗ
         users = DatabaseConnector.fetch_data("Users")
         if not users.empty and email in users['email'].values:
-            return False
+            return False # Το email υπάρχει ήδη
         
-        # Κρυπτογράφηση κωδικού (Hash)
+        # 3. ΚΡΥΠΤΟΓΡΑΦΗΣΗ (HASHING)
         hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         
-        # Δημιουργία εγγραφής
+        # 4. ΔΗΜΙΟΥΡΓΙΑ ΕΓΓΡΑΦΗΣ
         new_user = [
-            str(datetime.now()), # Ημερομηνία
+            str(datetime.now()), # Timestamp
             email,
             name,
             hashed,
