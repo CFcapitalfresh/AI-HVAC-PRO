@@ -1,0 +1,133 @@
+"""
+CORE MODULE: AI ENGINE (VISION EDITION)
+---------------------------------------
+Handles communication with Google Gemini.
+FEATURES:
+- Native PDF Support (Text & Images/Scans)
+- Smart Model Discovery
+"""
+import google.generativeai as genai
+import logging
+from core.config_loader import ConfigLoader
+from typing import List, Dict, Any, Optional # NEW
+
+logger = logging.getLogger("Core.AI")
+
+class AIEngine:
+    def __init__(self):
+        self.api_key = ConfigLoader.get_gemini_key()
+        self.model = None
+        self.last_error = None
+        self._setup()
+
+    def _setup(self):
+        if not self.api_key:
+            self.last_error = "MISSING API KEY: GEMINI_KEY not found in secrets.toml or environment variables."
+            logger.error(self.last_error)
+            return
+
+        try:
+            genai.configure(api_key=self.api_key)
+            logger.info("AI Engine: Gemini API configured.")
+            
+            available_models = []
+            try:
+                # Attempt to list models to verify API key and connectivity
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available_models.append(m.name)
+                logger.info(f"AI Engine: Found {len(available_models)} available models supporting generateContent.")
+            except Exception as e:
+                self.last_error = f"Failed to list Gemini models (API Key or network issue?): {e}"
+                logger.error(self.last_error, exc_info=True)
+                return # Stop if we can't even list models
+
+            preferred = [
+                "models/gemini-1.5-flash", 
+                "models/gemini-1.5-flash-latest",
+                "models/gemini-1.5-pro",
+                "models/gemini-1.5-pro-latest",
+                "models/gemini-pro" # Fallback to gemini-pro if 1.5-flash/pro not available
+            ]
+            
+            selected_model_name = None
+            for p in preferred:
+                if p in available_models:
+                    selected_model_name = p
+                    break
+            
+            # If no preferred model found, try any available gemini model
+            if not selected_model_name and available_models:
+                for m in available_models:
+                    if "gemini" in m.lower(): # Case-insensitive check
+                        selected_model_name = m
+                        break
+                logger.info(f"AI Engine: Fallback to a generic Gemini model: {selected_model_name}")
+
+
+            if selected_model_name:
+                self.model = genai.GenerativeModel(selected_model_name)
+                self.last_error = None # Clear any previous errors
+                logger.info(f"AI Engine: Successfully selected and initialized model: {selected_model_name}")
+            else:
+                self.last_error = "No suitable Gemini model found that supports content generation."
+                logger.error(self.last_error)
+                
+        except Exception as e:
+            self.last_error = f"CRITICAL AI Engine setup error: {e}"
+            logger.critical(self.last_error, exc_info=True)
+
+    def get_chat_response(self, content_parts: list, lang: str = "gr", manual_file_content: Optional[str] = None): # MODIFIED
+        """
+        Απαντάει στο chat λαμβάνοντας υπόψη μια λίστα από content parts (κείμενο, αρχεία).
+        Args:
+            content_parts: Μια λίστα από PAIRED_CONTENT (text parts, file parts for Vision).
+                           Είναι η ευθύνη του καλούντος να φτιάξει αυτή τη λίστα σωστά.
+            lang: Γλώσσα για τις οδηγίες συστήματος.
+            manual_file_content: (ΝΕΟ) Περιεχόμενο ενός μεμονωμένου manual (κείμενο) για πρόσθετο context.
+        """
+        if not self.model: 
+            error_message = f"⚠️ AI Offline ({self.last_error or 'Model not initialized'})"
+            logger.error(f"AI Engine: Cannot get chat response because model is not initialized. Error: {self.last_error}")
+            return error_message
+        
+        target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
+        
+        system_instruction_part = {
+            "text": f"""
+            ROLE: You are 'Mastro Nek', an Elite HVAC Technical Support Specialist.
+            
+            TASK: Answer the user's question based on the provided Technical Manuals and Images, and the conversation history.
+            
+            INSTRUCTIONS:
+            1. **ANALYZE**: Look at all provided documents (PDFs) and images carefully. They may contain text, diagrams, or scanned images. Consider the conversation history for context.
+            2. **VERIFY**: Check if the documents actually cover the specific error or issue the user asked about.
+            3. **ANSWER**:
+               - If the solution is in the manuals, explain it step-by-step.
+               - Cite sources: If specific to a manual, mention the filename. If general knowledge, state "⚠️ **Πηγή:** Γενική Γνώση (Δεν βρέθηκε στα εγχειρίδια)".
+               - Be concise and provide actionable advice.
+            
+            OUTPUT FORMAT:
+            - **Diagnosis**: What is the problem?
+            - **Solution**: Step-by-step fix.
+            - **Tools**: What tools are needed?
+            
+            LANGUAGE: Answer ONLY in {target_lang}.
+            """
+        }
+        
+        try:
+            # Combine system instruction with other content parts
+            full_content_to_send = [system_instruction_part] + content_parts
+            
+            # NEW: Add manual_file_content if provided
+            if manual_file_content:
+                full_content_to_send.append({"text": f"Συνημμένο Manual Content: {manual_file_content}"})
+                logger.info("Added manual_file_content to AI request.")
+
+            response = self.model.generate_content(full_content_to_send)
+            return response.text
+            
+        except Exception as e:
+            logger.error(f"AI Engine: Error generating content: {e}", exc_info=True)
+            return f"⚠️ AI Error during content generation: {str(e)}"

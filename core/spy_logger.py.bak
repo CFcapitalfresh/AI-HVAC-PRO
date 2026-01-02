@@ -1,0 +1,84 @@
+"""
+CORE: SPY LOGGER (Ο ΚΑΤΑΣΚΟΠΟΣ)
+-------------------------------
+Captures system logs and displays them in Streamlit Sidebar.
+Version: 1.2 (Drive Persistence Edition) - ΝΕΟ: Αποθήκευση στο Google Drive.
+"""
+import logging
+import streamlit as st
+import datetime
+# Το DatabaseConnector χρησιμοποιείται πλέον για τις μεθόδους του Drive
+from core.db_connector import DatabaseConnector 
+from typing import Optional # Για type hinting
+
+logger = logging.getLogger("Core.Spy") # Ensure logger name is consistent
+
+class StreamlitSpyHandler(logging.Handler):
+    """Ένας ειδικός 'πράκτορας' που κλέβει τα logs και τα βάζει στο Session State."""
+    
+    def emit(self, record):
+        try:
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            msg = self.format(record)
+            
+            # Εικονίδια για εύκολη ανάγνωση
+            icon = "ℹ️"
+            if record.levelno == logging.WARNING: icon = "⚠️"
+            elif record.levelno == logging.ERROR: icon = "❌"
+            elif record.levelno == logging.CRITICAL: icon = "🔥"
+            elif "Success" in msg or "✅" in msg: icon = "✅"
+            elif "Vision" in msg: icon = "👁️"
+            elif "Drive" in msg: icon = "📂"
+            elif "Spy" in record.name: icon = "🕵️" # Για τα δικά του logs του Spy
+            
+            entry = f"`{timestamp}` {icon} **{record.name}:** {msg}"
+            
+            # Αποθήκευση στη μνήμη του Streamlit
+            if "spy_logs" not in st.session_state:
+                st.session_state.spy_logs = []
+            
+            # Κρατάμε τα τελευταία 100 logs (Νέα πάνω)
+            st.session_state.spy_logs.insert(0, entry)
+            if len(st.session_state.spy_logs) > 100:
+                st.session_state.spy_logs.pop()
+            
+            # REMOVED: Αποθήκευση στην τοπική βάση SQLite
+            # DatabaseConnector.insert_spy_log(log_entry_db)
+
+        except Exception:
+            self.handleError(record)
+
+def setup_spy():
+    """Ενεργοποιεί τον κατάσκοπο στο ξεκίνημα."""
+    if "spy_active" not in st.session_state:
+        # Ρύθμιση του βασικού Logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        
+        # Καθαρισμός παλιών handlers για να μην έχουμε διπλά μηνύματα
+        # ΔΙΟΡΘΩΣΗ: Προστέθηκε το 'in root_logger.handlers' στη list comprehension
+        root_logger.handlers = [h for h in root_logger.handlers if h.level >= root_logger.level and not isinstance(h, StreamlitSpyHandler)]
+        
+        # Προσθήκη του δικού μας Handler
+        spy = StreamlitSpyHandler()
+        formatter = logging.Formatter('%(message)s')
+        spy.setFormatter(formatter)
+        root_logger.addHandler(spy)
+        
+        st.session_state.spy_active = True
+        
+        # REMOVED: Δεν φορτώνουμε πλέον logs από SQLite
+        st.session_state.spy_logs = [] # Ensure it's initialized
+        st.session_state.spy_logs.insert(0, "`System` 🕵️ Ο Κατάσκοπος είναι Οnline (τα logs τώρα αποθηκεύονται στο Drive).")
+
+def sync_current_spy_logs_to_drive() -> Optional[str]: # NEW
+    """
+    Συγχρονίζει τα τρέχοντα logs του Spy Logger στο Google Drive.
+    Επιστρέφει το link του αρχείου στο Drive.
+    """
+    if "spy_logs" in st.session_state and st.session_state.spy_logs:
+        # Κάνουμε μια shallow copy της λίστα για να αποφύγουμε προβλήματα αν αλλάξει κατά τη μεταφόρτωση
+        log_link = DatabaseConnector.upload_spy_logs_to_drive(list(st.session_state.spy_logs)) 
+        return log_link
+    logger.info("No spy logs found in session state to upload.")
+    return None

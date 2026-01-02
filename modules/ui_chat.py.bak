@@ -1,0 +1,49 @@
+"""
+MODULE: UI CHAT (CONNECTED)
+---------------------------
+Description: Streamlit UI wrapper for the core AI chat interface.
+"""
+
+import streamlit as st
+import logging
+# Παλιές εισαγωγές:
+# from core.ai_engine import AIEngine # Το AI Engine είναι το 'brain'
+from services.chat_session import ChatSessionService # ΝΕΟ: Εισαγωγή της υπηρεσίας ChatSession
+from core.auth_manager import AuthManager # Για καταγραφή αλληλεπιδράσεων
+from app_modules.chat_interface import render_chat_interface as core_render_chat_interface # Η βασική λογική UI του chat
+from core.language_pack import get_text # Για πολύγλωσση υποστήριξη
+
+logger = logging.getLogger("Module_Chat_UI") # Αρχικοποίηση Logger για αυτό το module
+
+def render(user):
+    """
+    Εμφανίζει το UI του AI Chat.
+    Φορτώνει τις απαραίτητες υπηρεσίες και καλεί την κεντρική λογική από το app_modules.
+    """
+    lang = st.session_state.get('lang', 'gr')
+
+    try:
+        # Κανόνας 6: Έλεγχος initialization keys
+        # Αρχικοποιούμε την ChatSessionService, η οποία με τη σειρά της αρχικοποιεί το AIEngine
+        if 'chat_session_service_instance' not in st.session_state:
+            st.session_state.chat_session_service_instance = ChatSessionService()
+            # Ελέγχουμε την κατάσταση του AI Engine μέσα στην ChatSessionService
+            if not st.session_state.chat_session_service_instance.ai_engine.model:
+                st.error(f"❌ {get_text('general_ui_error', lang).format(error='AI Engine initialization failed within ChatSessionService: ' + (st.session_state.chat_session_service_instance.ai_engine.last_error or 'Unknown Error'))}")
+                logger.critical(f"Chat UI: AI Engine failed to initialize via ChatSessionService: {st.session_state.chat_session_service_instance.ai_engine.last_error}")
+                return
+            logger.info("ChatSessionService and AI Engine initialized for chat.")
+        
+        # Το AuthManager χρειάζεται μόνο για τα logs, δεν κρατάει state
+        auth_manager_instance = AuthManager()
+
+        # Κανόνας 4: Χρήση try/except block
+        core_render_chat_interface(
+            brain_module=st.session_state.chat_session_service_instance, # Περνάμε το ChatSessionService ως "brain"
+            auth_module=auth_manager_instance,
+            user_email=user['email']
+        )
+
+    except Exception as e:
+        logger.error(f"Chat UI: General rendering error in render function for user {user['email']}: {e}", exc_info=True)
+        st.error(f"{get_text('general_ui_error', lang).format(error=e)}") # Κανόνας 5: Υποστήριξη GR/EN

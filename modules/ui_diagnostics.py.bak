@@ -1,0 +1,124 @@
+"""
+MODULE: UI DIAGNOSTICS (CONNECTED)
+----------------------------------
+Description: Interactive Wizard that inherits context from Chat.
+"""
+
+import streamlit as st
+import logging # Κανόνας 4: Χρήση του κανονικού logging
+from services.diagnostics_logic import DiagnosticsService
+from core.language_pack import get_text
+import time
+
+logger = logging.getLogger("Module_Diagnostics_UI") # Αρχικοποίηση Logger
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+
+    st.header(get_text('diag_title', lang))
+    st.subheader(get_text('diag_subtitle', lang)) # Μεταφρασμένο υποτίτλο
+    
+    # --- AUTO-FILL LOGIC (Inherit from Chat) ---
+    default_error = ""
+    if 'diag_prefill_error' in st.session_state:
+        default_error = st.session_state.diag_prefill_error
+        # Καθαρίζουμε το flag για να μην κολλήσει εκεί για πάντα
+        del st.session_state.diag_prefill_error 
+        
+    context_info = ""
+    if 'context_brand' in st.session_state and st.session_state.context_brand != "-":
+        context_info = f"Συσκευή: {st.session_state.context_brand}"
+
+    if 'diag_step' not in st.session_state: st.session_state.diag_step = 0
+    if 'diag_plan' not in st.session_state: st.session_state.diag_plan = None
+    
+    try: # Κανόνας 4: Γενικό try/except block
+        # 1. Input Section
+        if not st.session_state.diag_plan:
+            with st.container(border=True):
+                st.subheader(get_text('diag_start_new', lang))
+                if context_info: st.info(f"🔗 {context_info}")
+                
+                # Το πεδίο παίρνει τιμή από το Chat (αν υπάρχει)
+                error_input = st.text_input(get_text('diag_input_ph', lang), value=default_error)
+                
+                # Context από Manuals
+                manual_context = ""
+                if 'active_manuals' in st.session_state and st.session_state.active_manuals:
+                    st.caption(f"📚 {get_text('diag_context', lang)} {len(st.session_state.active_manuals)} manuals loaded.")
+                    # Προσοχή: Εδώ λαμβάνουμε υπόψη μόνο το πρώτο manual ως context αν υπάρχουν πολλά
+                    manual_context = str(st.session_state.active_manuals[0])
+
+                if st.button(get_text('diag_btn_create', lang), type="primary", use_container_width=True):
+                    if error_input:
+                        with st.spinner(get_text('diag_spinner', lang)):
+                            service = DiagnosticsService()
+                            plan = service.generate_checklist(error_input, manual_context, lang=lang)
+                            
+                            if plan:
+                                st.session_state.diag_plan = plan
+                                st.session_state.diag_step = 0
+                                st.rerun()
+                            else:
+                                st.error(get_text('diag_fail', lang))
+                                logger.error(f"Diagnostics: Failed to generate plan for input: {error_input}")
+                    else:
+                        st.warning(get_text('diag_input_ph', lang)) # Να συμπληρώσει κάτι ο χρήστης
+        
+        # 2. Active Wizard (Same as before)
+        else:
+            plan = st.session_state.diag_plan
+            steps = plan.get('steps', [])
+            current_idx = st.session_state.diag_step
+            
+            # Ενημέρωση εδώ για μετάφραση του τίτλου του πλάνου
+            st.subheader(f"🛡️ {plan.get('title', get_text('diag_plan_title', lang))}") # Μεταφράσιμο fallback
+            
+            if len(steps) > 0: # Αποφυγή DivisionByZero αν δεν υπάρχουν βήματα
+                progress = (current_idx / len(steps))
+                st.progress(progress, text=f"{get_text('diag_step', lang)} {current_idx + 1} {get_text('diag_of', lang)} {len(steps)}")
+            else:
+                st.progress(0, text=f"{get_text('diag_step', lang)} 0 {get_text('diag_of', lang)} 0")
+
+
+            if current_idx >= len(steps):
+                st.success(get_text('diag_done', lang))
+                if st.button(get_text('diag_btn_new', lang)):
+                    st.session_state.diag_plan = None
+                    st.session_state.diag_step = 0
+                    st.rerun()
+                return
+
+            step = steps[current_idx]
+            
+            with st.container(border=True):
+                st.markdown(f"### {get_text('diag_step', lang)} {step['id']}")
+                st.markdown(f"**{get_text('diag_action', lang)}** {step['action']}")
+                if 'tip' in step:
+                    st.info(f"💡 Tip: {step['tip']}")
+                
+                st.divider()
+                st.markdown(f"**{get_text('diag_question', lang)}** {step['question']}")
+                
+                c1, c2 = st.columns(2)
+                
+                if c1.button(get_text('diag_yes', lang), use_container_width=True):
+                    st.balloons()
+                    st.success(get_text('diag_solved_msg', lang))
+                    logger.info(f"Diagnostics: User marked step {step['id']} as solved.")
+                    time.sleep(2)
+                    st.session_state.diag_plan = None
+                    st.rerun()
+                    
+                if c2.button(get_text('diag_no', lang), use_container_width=True):
+                    st.session_state.diag_step += 1
+                    logger.info(f"Diagnostics: User continued to step {st.session_state.diag_step}.")
+                    st.rerun()
+            
+            if st.button(get_text('diag_cancel', lang)):
+                st.session_state.diag_plan = None
+                st.rerun()
+
+    except Exception as e:
+        logger.error(f"Diagnostics UI: General rendering error in render function for user {user}: {e}", exc_info=True)
+        st.error(f"{get_text('general_ui_error', lang).format(error=e)}") # Κανόνας 5

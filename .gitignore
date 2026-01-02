@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+.streamlit/
+
+# Google Drive Keys (ΑΥΤΑ ΕΛΕΙΠΑΝ)
+credentials.json
+token.json
+client_secret.json
+drive_config.json
+drive_index.json
+
+# Logs & System
+*.log
+logs/
+.DS_Store
+Thumbs.db
+
+# Temp files
+FULL_PROJECT_CODE.txt

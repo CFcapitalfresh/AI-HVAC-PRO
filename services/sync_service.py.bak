@@ -1,0 +1,244 @@
+"""
+SERVICE: SYNC SERVICE (FINAL SELF-CONTAINED FIX)
+------------------------------------------------
+1. Path Aware: Captures 'Brand | Model' properly.
+2. Direct API Calls: Bypasses missing methods in DriveManager.
+3. Update Only: Updates existing 'drive_index.json' to avoid Quota limits.
+4. METADATA EXTRACTION: Extracts Brand, Model, and Meta_Type from file paths.
+"""
+import streamlit as st
+import json
+import os
+from core.drive_manager import DriveManager
+from core.config_loader import ConfigLoader
+import logging
+from googleapiclient.http import MediaIoBaseUpload
+import io
+import re
+
+logger = logging.getLogger("Sync")
+INDEX_FILENAME = "drive_index.json"
+
+class SyncService:
+    def __init__(self):
+        self.drive = DriveManager()
+        self.root_id = ConfigLoader.get_drive_folder_id()
+
+    def scan_library(self):
+        """Σαρώνει και ΕΝΗΜΕΡΩΝΕΙ (Update) το αρχείο στο Cloud."""
+        logger.info("🔄 Starting Sync (Direct Mode)...")
+        
+        if not self.root_id: 
+            logger.error("❌ Root ID missing.")
+            return []
+        
+        # Μπάρα Προόδου
+        progress_text = "⏳ Σάρωση & Ενημέρωση..."
+        my_bar = st.progress(0, text=progress_text)
+        
+        # 1. ΣΑΡΩΣΗ (Path Aware)
+        # Περνάμε το my_bar και progress_text για ενημερώσεις στην πρόοδο
+        # Adjusted total_progress_steps to allow for better granularity, assuming ~100 files in a small library
+        all_files = self._scan_recursive(self.root_id, path_prefix="", my_bar=my_bar, progress_text=progress_text, current_progress=0, total_progress_steps=80) # 80% for scanning
+        
+        my_bar.progress(80, text=f"✅ Βρέθηκαν {len(all_files)} αρχεία. Εγγραφή στο Cloud...")
+        logger.info(f"✅ Scan Complete. Found {len(all_files)} manuals.")
+
+        # 2. Αποθήκευση Τοπικά (Backup)
+        try:
+            with open(INDEX_FILENAME, "w", encoding="utf-8") as f:
+                json.dump(all_files, f, ensure_ascii=False, indent=2)
+            logger.info(f"💾 Local index saved: {INDEX_FILENAME}")
+        except Exception as e:
+            logger.warning(f"Failed to save local index: {e}")
+
+        # 3. CLOUD UPDATE (Direct API Call - Χωρίς μεσάζοντες)
+        try:
+            # Απευθείας αναζήτηση μέσω του service (παρακάμπτουμε το DriveManager)
+            query = f"name = '{INDEX_FILENAME}' and '{self.root_id}' in parents and trashed = false"
+            results = self.drive.service.files().list(q=query, fields="files(id, name)").execute()
+            found_files = results.get('files', [])
+            
+            if not found_files:
+                logger.error("❌ CLOUD ERROR: Δεν βρέθηκε το 'drive_index.json'!")
+                st.error("⚠️ Σφάλμα: Πρέπει να δημιουργήσετε ένα κενό αρχείο 'drive_index.json' στο Drive σας!")
+                return all_files
+
+            # Παίρνουμε το ID του αρχείου
+            target_file_id = found_files[0]['id']
+            logger.info(f"📂 Found Cloud Index ID: {target_file_id}")
+            
+            # Ετοιμάζουμε τα δεδομένα
+            json_str = json.dumps(all_files, ensure_ascii=False, indent=2)
+            media = MediaIoBaseUpload(io.BytesIO(json_str.encode('utf-8')), mimetype='application/json', resumable=True)
+
+            # ΕΚΤΕΛΕΣΗ UPDATE
+            self.drive.service.files().update(
+                fileId=target_file_id,
+                media_body=media
+            ).execute()
+            
+            logger.info(f"☁️ Cloud Index OVERWRITTEN successfully!")
+            my_bar.progress(100, text="✅ Ολοκληρώθηκε! Η βάση ενημερώθηκε.")
+            
+            # Καθαρισμός Session
+            if 'library_index' in st.session_state:
+                del st.session_state['library_index']
+            if 'library_cache' in st.session_state: # Clear cache from ui_search
+                del st.session_state['library_cache']
+                
+            return all_files
+            
+        except Exception as e:
+            logger.error(f"❌ Cloud Update Failed: {e}", exc_info=True)
+            st.error(f"❌ Σφάλμα κατά την ενημέρωση Cloud: {e}")
+            return all_files
+
+    def _extract_metadata_from_name(self, full_path_name: str, original_filename: str) -> dict:
+        """
+        Εξάγει μεταδεδομένα (brand, model, meta_type, error_codes) από ένα όνομα αρχείου
+        που έχει μορφοποιηθεί από τον Sorter (π.χ., "Category | Brand | Model | Type | Filename.pdf")
+        ή από την original_filename αν δεν υπάρχει πλήρης διαδρομή.
+        """
+        metadata = {
+            'brand': 'Unknown',
+            'model': 'General Model',
+            'meta_type': 'DOC',
+            'error_codes': '', # Requires AI to extract, for now remains empty from path
+            'original_name': original_filename # Keep the original filename
+        }
+
+        # Προσπαθούμε να διασπάσουμε με βάση το '|' από την πλήρη διαδρομή
+        parts = [p.strip() for p in full_path_name.split('|')]
+        
+        # Αν η πλήρης διαδρομή είναι μορφοποιημένη (π.χ., Category | Brand | Model | Type)
+        # The Sorter's naming convention for a file within its full path is:
+        # Category | Brand | Model | Type | Original_filename_without_ext.pdf
+        # So, if we split the full_path_name by '|', we expect at least 4 parts before the filename itself (which is the last part).
+        if len(parts) >= 4: 
+            # metadata['category'] = parts[0] # Not directly needed for search, but good to know
+            metadata['brand'] = parts[1] if parts[1] else 'Unknown'
+            metadata['model'] = parts[2] if parts[2] else 'General Model'
+            metadata['meta_type'] = parts[3] if parts[3] else 'DOC'
+            # The actual file name is often the last part, after potential type info
+            # The 'name' field in the item already contains the full path name, so 'original_name' is distinct.
+
+        # Fallback for brand/model/type if not found in path_prefix, try to infer from original_filename
+        # (e.g. if the file wasn't sorted yet, but we want some basic metadata)
+        if metadata['brand'] == 'Unknown' and original_filename:
+            match = re.search(r'^(.*?)[_ -](.*?)', original_filename, re.IGNORECASE)
+            if match:
+                metadata['brand'] = match.group(1).strip()
+                # A very basic attempt to get a model from the first few words
+                if len(match.group(2)) > 3:
+                     metadata['model'] = match.group(2).split(' ')[0].strip()
+
+        # Basic error code extraction from original filename if not already set
+        if not metadata['error_codes'] and original_filename:
+            error_match = re.search(r'(E\d+|ERROR\s*\d+)', original_filename, re.IGNORECASE)
+            if error_match:
+                metadata['error_codes'] = error_match.group(0).upper()
+        
+        return metadata
+
+
+    def _scan_recursive(self, folder_id, path_prefix="", my_bar=None, progress_text="", current_progress=0, total_progress_steps=0, depth=0):
+        """
+        Χτίζει τα ονόματα με βάση τους φακέλους (ARISTON | FAST...).
+        Περιορίζει τη σάρωση σε συγκεκριμένα βάθη και παρακάμπτει τους ταξινομημένους φακέλους
+        για να μην επεξεργάζονται διπλά.
+        """
+        results = []
+        if depth > 5: # Περιορισμός βάθους για αποφυγή άπειρης αναδρομής
+            logger.warning(f"Reached max recursion depth for folder {folder_id}.")
+            return [] 
+
+        try:
+            items = self.drive.list_files_in_folder(folder_id)
+            
+            subfolders = [i for i in items if i['mimeType'] == 'application/vnd.google-apps.folder']
+            files = [i for i in items if i['mimeType'] == 'application/pdf']
+            
+            # Dynamic progress increment for this level
+            remaining_progress = total_progress_steps - current_progress
+            total_items_in_level = len(files) + len(subfolders)
+            progress_for_level = remaining_progress / total_items_in_level if total_items_in_level > 0 else 0
+
+            # Files
+            for i, item in enumerate(files):
+                display_name = item['name']
+                if path_prefix:
+                    display_name = f"{path_prefix} | {item['name']}"
+                
+                meta = {
+                    'file_id': item['id'],
+                    'name': display_name,
+                    'link': item.get('webViewLink', ''),
+                    'mime': item['mimeType']
+                }
+                
+                # ΝΕΟ: Εξαγωγή πρόσθετων μεταδεδομένων
+                # Pass original item name for better metadata extraction
+                extracted_meta = self._extract_metadata_from_name(display_name, item['name'])
+                meta.update(extracted_meta)
+                
+                results.append(meta)
+                if my_bar:
+                    current_progress += progress_for_level / total_items_in_level
+                    my_bar.progress(min(100, int(current_progress)), text=f"{progress_text} - Scanning: {item['name']}")
+
+            # Folders
+            for i, folder in enumerate(subfolders):
+                # Skip folders that are explicitly ignored or represent already categorized branches
+                # This logic should match the Sorter's logic for filtering what to process.
+                # For sync service, we want to index everything regardless of being sorted,
+                # but we still want to skip actual trash folders or manual review zones.
+                if folder['name'] in ["Trash", "_MANUAL_REVIEW", "_AI_ERROR", "_NEEDS_OCR"]: # Add other ignored folders here
+                    logger.info(f"📂 Skipping ignored folder during sync scan: {folder['name']}")
+                    continue
+
+                new_prefix = folder['name']
+                if path_prefix:
+                    new_prefix = f"{path_prefix} | {folder['name']}"
+                
+                # Update progress before recursive call
+                if my_bar:
+                    my_bar.progress(min(100, int(current_progress + (i / len(subfolders)) * progress_for_level)), text=f"{progress_text} - Entering folder: {folder['name']}")
+
+                results.extend(self._scan_recursive(folder['id'], new_prefix, my_bar, progress_text, current_progress, total_progress_steps, depth + 1))
+                
+        except Exception as e:
+            logger.warning(f"Scan Error in folder {folder_id} with prefix '{path_prefix}': {e}", exc_info=True)
+        return results
+
+    def load_index(self):
+        # 1. Local
+        if os.path.exists(INDEX_FILENAME):
+            try:
+                with open(INDEX_FILENAME, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    logger.info(f"💾 Loaded local index: {len(data)} files.")
+                    return data
+            except Exception as e:
+                logger.warning(f"Failed to load local index: {e}")
+            
+        # 2. Cloud Download (Direct API)
+        if self.root_id:
+            try:
+                query = f"name = '{INDEX_FILENAME}' and '{self.root_id}' in parents and trashed = false"
+                results = self.drive.service.files().list(q=query, fields="files(id)").execute()
+                files = results.get('files', [])
+                
+                if files:
+                    file_id = files[0]['id']
+                    stream = self.drive.download_file_content(file_id)
+                    if stream:
+                        data = json.load(stream)
+                        # Cache
+                        with open(INDEX_FILENAME, "w", encoding="utf-8") as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        logger.info(f"☁️ Downloaded and cached cloud index: {len(data)} files.")
+                        return data
+            except Exception as e:
+                logger.error(f"❌ Cloud Index Download Failed: {e}", exc_info=True)
+        return []

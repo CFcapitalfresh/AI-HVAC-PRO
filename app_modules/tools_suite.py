@@ -1,0 +1,76 @@
+"""
+MODULE: Tools Suite & Clients
+VERSION: 1.5.0 (TITANIUM)
+DESCRIPTION: Περιέχει τα υπολογιστικά εργαλεία και την προβολή πελατολογίου.
+"""
+
+import streamlit as st
+import pandas as pd
+from typing import Any
+
+def render_tools_page() -> None:
+    """Εμφανίζει τα εργαλεία υπολογισμού."""
+    st.title("🧮 HVAC Tools Suite")
+    
+    t1, t2 = st.tabs(["❄️ BTU Calculator", "📏 Unit Converter"])
+    
+    with t1:
+        st.subheader("Υπολογισμός Ψυκτικών Φορτίων (BTU)")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            area = st.number_input("Εμβαδόν Χώρου (m²)", min_value=1.0, value=20.0, step=1.0)
+            height = st.number_input("Ύψος (m)", min_value=2.0, value=3.0, step=0.1)
+        with c2:
+            insulation = st.selectbox("Μόνωση", ["Καλή", "Μέτρια", "Κακή"])
+            sun = st.selectbox("Έκθεση στον Ήλιο", ["Χαμηλή", "Μέτρια", "Υψηλή"])
+            
+        # Logic
+        factor = 500 # Base
+        if insulation == "Καλή": factor -= 50
+        if insulation == "Κακή": factor += 100
+        if sun == "Υψηλή": factor += 80
+        
+        # Volume Correction
+        vol_correction = 1.0
+        if height > 3.0: vol_correction = height / 3.0
+        
+        result = area * factor * vol_correction
+        
+        st.divider()
+        st.success(f"📌 Απαιτούμενη Ισχύς: **{int(result):,} BTU/h**")
+        st.info("ℹ️ *Ο υπολογισμός είναι εμπειρικός.*")
+
+    with t2:
+        st.write("🔧 Converter coming soon...")
+
+def render_clients_viewer(data_manager: Any) -> None:
+    """
+    Εμφανίζει το πελατολόγιο από τα Google Sheets.
+    Args:
+        data_manager: Μια κλάση/μέθοδος από το main.py που φέρνει δεδομένα.
+    """
+    st.title("📇 Πελατολόγιο")
+    
+    # Φόρτωση δεδομένων
+    with st.spinner("Φόρτωση Πελατών..."):
+        # Υποθέτουμε ότι το DataManager έχει μέθοδο fetch_sheet_data
+        try:
+            df = data_manager.fetch_sheet_data("Clients")
+        except Exception as e:
+            st.error(f"Error fetching clients: {e}")
+            return
+
+    if df.empty:
+        st.warning("Η λίστα πελατών είναι κενή.")
+        return
+
+    # Αναζήτηση
+    search = st.text_input("🔍 Αναζήτηση Πελάτη", placeholder="Όνομα, Τηλέφωνο ή Διεύθυνση...")
+    
+    if search:
+        mask = df.astype(str).apply(lambda x: x.str.contains(search, case=False, na=False)).any(axis=1)
+        df = df[mask]
+        st.success(f"Βρέθηκαν {len(df)} εγγραφές.")
+        
+    st.dataframe(df, use_container_width=True, hide_index=True)

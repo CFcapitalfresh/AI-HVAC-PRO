@@ -1,0 +1,175 @@
+"""
+SERVICE: CHAT SESSION (INTENT AWARE)
+------------------------------------
+Sorts manuals based on user query keywords.
+"""
+import streamlit as st
+from services.sync_service import SyncService
+from core.drive_manager import DriveManager
+from core.ai_engine import AIEngine # ΝΕΟ: Import AIEngine
+from typing import List, Dict, Any
+import logging
+
+logger = logging.getLogger("Service.ChatSession")
+
+class ChatSessionService:
+    def __init__(self):
+        self.sync = SyncService()
+        self.drive = DriveManager()
+        self.ai_engine = AIEngine() # ΝΕΟ: Αρχικοποίηση AIEngine
+        if 'library_cache' not in st.session_state:
+            st.session_state.library_cache = self.sync.load_index()
+        logger.info("ChatSessionService initialized.")
+
+
+    def get_brands(self):
+        """Επιστρέφει τις μάρκες."""
+        data = st.session_state.get('library_cache', [])
+        brands = set()
+        for item in data:
+            name = item.get('name', '')
+            parts = name.split('|')
+            if len(parts) >= 2:
+                brand = parts[1].strip().upper()
+                if brand and len(brand) > 1: brands.add(brand)
+            elif '_' in name:
+                parts_old = name.split('_')
+                if parts_old: brands.add(parts_old[0].upper())
+        return sorted(list(brands))
+
+    def get_prioritized_manuals(self, brand, model_keyword, user_query):
+        """
+        ΤΟ ΜΥΣΤΙΚΟ ΟΠΛΟ:
+        1. Βρίσκει τα αρχεία της μάρκας.
+        2. Καταλαβαίνει τι ρωτάει ο χρήστης (Intent).
+        3. Αλλάζει τη σειρά των αρχείων δυναμικά.
+        """
+        data = st.session_state.get('library_cache', [])
+        results = []
+        target_brand = brand.upper()
+        target_model = model_keyword.upper() if model_keyword else None
+        
+        # 1. Βασικό Φιλτράρισμα
+        for item in data:
+            name_upper = item['name'].upper()
+            if target_brand in name_upper:
+                if target_model and target_model not in name_upper:
+                    continue
+                results.append(item)
+
+        # 2. Ανίχνευση Πρόθεσης (Intent)
+        query = user_query.upper()
+        intent = "GENERAL"
+        
+        if any(x in query for x in ["ERROR", "ΒΛΑΒΗ", "ΣΦΑΛΜΑ", "FAULT", "CODE", "ΚΩΔΙΚΟΣ", "FIX", "PROBLEM"]):
+            intent = "ERROR"
+        elif any(x in query for x in ["INSTALL", "ΕΓΚΑΤΑΣΤΑΣΗ", "ΣΥΝΔΕΣΗ", "PIPE", "WIRING", "ΔΙΑΣΤΑΣΕΙΣ"]):
+            intent = "INSTALL"
+        elif any(x in query for x in ["USER", "ΧΡΗΣΗ", "ΟΔΗΓΙΕΣ", "RESET", "ΚΟΥΜΠΙ", "MODE", "ECO"]):
+            intent = "USER"
+        elif any(x in query for x in ["PART", "ΑΝΤΑΛΛΑΚΤΙΚ", "SPARE", "VALVE", "PCB", "SENSOR", "ΑΙΣΘΗΤΗΡ", "ΤΙΜΗ"]):
+            intent = "PARTS"
+
+        # 3. Δυναμική Βαθμολόγηση (Scoring)
+        # Χρησιμοποιούμε lambda function για να περάσουμε το intent
+        results.sort(key=lambda item: self._calculate_score(item, intent), reverse=True)
+            
+        return results
+
+    def _calculate_score(self, item, intent):
+        """Δίνει πόντους στο αρχείο ανάλογα με το αν ταιριάζει στην ερώτηση."""
+        name = item['name'].upper()
+        score = 0
+        
+        # --- SCORING RULES ---
+        
+        if intent == "PARTS":
+            # Αν ψάχνει ανταλλακτικά, αυτά πάνε κορυφή (100)
+            if "SPARE" in name or "PARTS" in name or "EXPLODED" in name: score += 100
+            elif "SERVICE" in name: score += 50
+            else: score += 10
+            
+        elif intent == "ERROR":
+            # Στις βλάβες θέλουμε Service & Install
+            if "SERVICE" in name: score += 100
+            elif "INSTALL" in name: score += 90
+            elif "USER" in name: score += 40
+            elif "SPARE" in name: score += 10 # Χαμηλή προτεραιότητα
+            
+        elif intent == "INSTALL":
+            if "INSTALL" in name: score += 100
+            elif "TECHNICAL" in name: score += 80
+            elif "SERVICE" in name: score += 60
+            
+        elif intent == "USER":
+            if "USER" in name or "OWNER" in name or "ΧΡΗΣΗ" in name: score += 100
+            elif "INSTALL" in name: score += 50
+            
+        else: # GENERAL (Default)
+            # Η κλασική σειρά: Service > Install > User > Parts
+            if "SERVICE" in name: score += 90
+            elif "INSTALL" in name: score += 80
+            elif "USER" in name: score += 70
+            elif "SPARE" in name: score += 20
+
+        return score
+
+    def handle_manual_upload(self, uploaded_file, brand, model):
+        root_id = ConfigLoader.get_drive_folder_id()
+        if not root_id: return False
+        safe_name = f"User_Uploads | {brand} | {model} | {uploaded_file.name}"
+        file_id = self.drive.upload_stream(uploaded_file, safe_name, root_id)
+        if file_id:
+            new_entry = {'file_id': file_id, 'name': safe_name, 'link': f"https://drive.google.com/file/d/{file_id}/view", 'mime': 'application/pdf'}
+            st.session_state.library_cache.append(new_entry)
+            return True
+        return False
+
+    # ΝΕΟ: Μέθοδος smart_solve που θα καλείται από το UI του Chat
+    def smart_solve(self, user_query: str, uploaded_pdfs: List[Any], uploaded_imgs: List[Any], history: List[Dict], lang: str = "gr") -> str:
+        """
+        Λογική επίλυσης προβλημάτων που χρησιμοποιεί AI και επισυναπτόμενα αρχεία.
+        Προετοιμάζει τα content parts για το AI Engine.
+        """
+        if not self.ai_engine.model:
+            logger.error(f"AI System Error: AI Engine not initialized in ChatSessionService. Last error: {self.ai_engine.last_error or 'Unknown'}")
+            return f"❌ **AI System Error:** AI Engine not initialized. {self.ai_engine.last_error or ''}"
+
+        content_parts = []
+
+        # Προσθήκη των τελευταίων μηνυμάτων του ιστορικού για context
+        # Λαμβάνουμε υπόψη τα 5 τελευταία ζευγάρια (user/assistant)
+        for msg in history[-10:]: # Περίπου 5 συνομιλίες μπρος-πίσω
+            if msg["role"] == "user":
+                content_parts.append({"text": f"Προηγούμενος Χρήστης: {msg['content']}"})
+            elif msg["role"] == "assistant":
+                content_parts.append({"text": f"Προηγούμενος Mastro Nek: {msg['content']}"})
+
+        # Προσθήκη PDF αρχείων
+        for pdf_file in uploaded_pdfs:
+            pdf_bytes = pdf_file.getvalue()
+            content_parts.append({
+                "mime_type": "application/pdf",
+                "data": pdf_bytes
+            })
+            content_parts.append({"text": f"Αρχείο PDF: {pdf_file.name}"})
+            logger.info(f"Adding PDF to AI context: {pdf_file.name}")
+
+
+        # Προσθήκη εικόνων
+        for img_file in uploaded_imgs:
+            img_bytes = img_file.getvalue()
+            content_parts.append({
+                "mime_type": img_file.type, # π.χ. "image/png"
+                "data": img_bytes
+            })
+            content_parts.append({"text": f"Εικόνα: {img_file.name}"})
+            logger.info(f"Adding Image to AI context: {img_file.name}")
+
+
+        # Προσθήκη της τρέχουσας ερώτησης του χρήστη
+        content_parts.append({"text": f"Τρέχουσα Ερώτηση Χρήστη: {user_query}"})
+        
+        # Κλήση του AI Engine
+        response = self.ai_engine.get_chat_response(content_parts=content_parts, lang=lang)
+        return response

@@ -1,0 +1,53 @@
+"""
+MODULE: UI SEARCH (CONNECTED)
+-----------------------------
+Description: Streamlit UI wrapper for the Global Library Search,
+now leveraging app_modules/search_engine.py for core UI/Search logic.
+"""
+import streamlit as st
+from services.sync_service import SyncService
+from core.language_pack import get_text
+from app_modules.search_engine import render_search_page as core_render_search_page # Import the core search UI
+
+def render(user):
+    lang = st.session_state.get('lang', 'gr')
+    srv = SyncService()
+    
+    st.header(get_text('menu_library', lang))
+    
+    # --- SYNC BUTTON ---
+    if st.button("🔄 Sync Library / Ανανέωση Βιβλιοθήκης", use_container_width=True):
+        with st.spinner("⏳ Σάρωση Drive & Ενημέρωση Ευρετηρίου..."):
+            try:
+                data = srv.scan_library() # Αυτό τώρα σώζει και στο Cloud
+                st.session_state.library_cache = data
+                st.success(f"✅ Ολοκληρώθηκε! Το ευρετήριο ενημερώθηκε. ({len(data)} αρχεία)")
+            except Exception as e:
+                st.error(f"❌ Error during library sync: {e}")
+                
+        st.rerun() # Force rerun to clear spinner and update search page
+
+    st.divider()
+
+    # --- SMART LOAD ---
+    # Rule 6: Streamlit State (ensure library_cache is loaded once or cached)
+    if 'library_cache' not in st.session_state or not st.session_state.library_cache:
+        with st.spinner("☁️ Φόρτωση Βιβλιοθήκης..."):
+            try:
+                st.session_state.library_cache = srv.load_index()
+                if not st.session_state.library_cache:
+                    st.info(f"ℹ️ {get_text('lic_admin_no_licenses', lang)} Πατήστε 'Sync' για αρχικοποίηση.") # Re-using key
+            except Exception as e:
+                st.error(f"❌ Error loading library index: {e}")
+                st.session_state.library_cache = [] # Ensure it's a list even on error
+                
+    data = st.session_state.get('library_cache', [])
+    
+    # --- DELEGATE TO CORE SEARCH UI ---
+    # Rule 3: Modularity - The UI module delegates the complex rendering
+    # and search logic to the app_modules.
+    try:
+        core_render_search_page(data)
+    except Exception as e:
+        st.error(f"{get_text('general_ui_error', lang).format(error=e)}")
+        logger.error(f"Error rendering search page: {e}", exc_info=True)

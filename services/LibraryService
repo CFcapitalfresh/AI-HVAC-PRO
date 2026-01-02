@@ -1,0 +1,105 @@
+"""
+SERVICE: LIBRARY SERVICE (SMART PARSER)
+---------------------------------------
+Reads the 'drive_index.json' and extracts Brands/Models 
+from the filename structure: "Category | BRAND | Model | Type"
+"""
+import json
+import os
+import logging
+import streamlit as st
+
+logger = logging.getLogger("Library")
+INDEX_FILENAME = "drive_index.json"
+
+class LibraryService:
+    def __init__(self):
+        self.index = self._load_index()
+
+    def _load_index(self):
+        """Φορτώνει το αρχείο json από τον δίσκο."""
+        if os.path.exists(INDEX_FILENAME):
+            try:
+                with open(INDEX_FILENAME, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data
+            except Exception as e:
+                logger.error(f"Error loading index: {e}")
+        return []
+
+    def get_all_brands(self):
+        """Εξάγει μοναδικές μάρκες από τα ονόματα των αρχείων."""
+        brands = set()
+        if not self.index:
+            return []
+
+        for item in self.index:
+            # Το όνομα είναι: "Heating | ARISTON | Model..."
+            name = item.get('name', '')
+            parts = name.split('|')
+            
+            # Αν το όνομα έχει διαχωριστικά (άρα είναι από το νέο σύστημα)
+            if len(parts) >= 2:
+                # Το 2ο κομμάτι είναι η Μάρκα (parts[1])
+                brand = parts[1].strip().upper()
+                if brand and brand not in ["UNKNOWN", "MISC", "NA"]:
+                    brands.add(brand)
+            
+            # Fallback για παλιά αρχεία (αν υπάρχουν)
+            elif 'brand' in item: 
+                 brands.add(item['brand'].upper())
+
+        return sorted(list(brands))
+
+    def get_models_by_brand(self, brand):
+        """Βρίσκει τα μοντέλα για τη συγκεκριμένη μάρκα."""
+        models = set()
+        if not self.index or not brand:
+            return []
+            
+        target_brand = brand.upper()
+
+        for item in self.index:
+            name = item.get('name', '')
+            parts = name.split('|')
+            
+            # Έλεγχος αν αυτό το αρχείο ανήκει στη μάρκα που θέλουμε
+            # Περίπτωση 1: Νέο format (Category | Brand | Model)
+            if len(parts) >= 2:
+                file_brand = parts[1].strip().upper()
+                if file_brand == target_brand:
+                    # Το 3ο κομμάτι είναι συνήθως το Μοντέλο
+                    if len(parts) >= 3:
+                        model = parts[2].strip()
+                        models.add(model)
+                    else:
+                        # Αν δεν έχει 3ο κομμάτι, παίρνουμε το όνομα του αρχείου
+                        models.add(item.get('original_name', 'Unknown'))
+                        
+        return sorted(list(models))
+
+    def search_manuals(self, brand=None, model=None):
+        """Ψάχνει τα manuals με βάση τα φίλτρα."""
+        results = []
+        if not self.index:
+            return []
+
+        for item in self.index:
+            name = item.get('name', '').upper()
+            
+            match_brand = True
+            match_model = True
+            
+            if brand:
+                # Ψάχνουμε αν η μάρκα υπάρχει μέσα στο όνομα (σαν λέξη)
+                if brand.upper() not in name:
+                    match_brand = False
+            
+            if model:
+                if model.upper() not in name:
+                    match_model = False
+            
+            if match_brand and match_model:
+                results.append(item)
+                
+        return results
