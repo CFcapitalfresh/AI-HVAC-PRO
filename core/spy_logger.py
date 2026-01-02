@@ -57,13 +57,8 @@ def setup_spy():
         root_logger.setLevel(logging.INFO)
         
         # Καθαρισμός παλιών handlers για να μην έχουμε διπλά μηνύματα
-<<<<<<< HEAD
-        # ΔΙΟΡΘΩΣΗ: Προστέθηκε το 'in root_logger.handlers' στη list comprehension
-=======
-        # ΔΙΟΡΘΩΣΗ: Προστέθηκε το 'if' στη list comprehension
-        # ΕΔΩ ΕΙΝΑΙ Η ΔΙΟΡΘΩΣΗ ΣΤΗ ΣΥΝΤΑΞΗ
->>>>>>> 9e77fa8 (update)
-        root_logger.handlers = [h for h in root_logger.handlers if h.level >= root_logger.level and not isinstance(h, StreamlitSpyHandler)]
+        # ΔΙΟΡΘΩΣΗ: Προστέθηκε το 'if' στη list comprehension για να αποφευχθούν τα merge conflicts
+        root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, StreamlitSpyHandler)]
         
         # Προσθήκη του δικού μας Handler
         spy = StreamlitSpyHandler()
