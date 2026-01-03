@@ -14,26 +14,20 @@ logger = logging.getLogger("Module_Search_UI") # Logger for this UI module
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
+    srv = SyncService()
     
-    # Cache SyncService instance (Rule 6)
-    if 'sync_service_instance_search' not in st.session_state:
-        st.session_state.sync_service_instance_search = SyncService()
-    srv = st.session_state.sync_service_instance_search
-    
-    # Removed header here as core_render_search_page handles it now.
-    # st.header(get_text('menu_library', lang)) # This should be handled by the core search module
+    st.header(get_text('menu_library', lang))
     
     # --- SYNC BUTTON ---
-    if st.button(get_text('search_lib_sync_btn', lang), use_container_width=True):
-        with st.spinner(get_text('search_sync_spinner', lang)):
+    if st.button("🔄 Sync Library / Ανανέωση Βιβλιοθήκης", use_container_width=True):
+        with st.spinner("⏳ Σάρωση Drive & Ενημέρωση Ευρετηρίου..."):
             try:
                 data = srv.scan_library() # Αυτό τώρα σώζει και στο Cloud
                 st.session_state.library_cache = data
-                st.success(get_text('search_sync_success', lang).format(count=len(data)))
-                logger.info(f"UI Search: Library sync completed successfully. {len(data)} files indexed.")
+                st.success(f"✅ Ολοκληρώθηκε! Το ευρετήριο ενημερώθηκε. ({len(data)} αρχεία)")
             except Exception as e:
                 logger.error(f"UI Search: Error during library sync: {e}", exc_info=True)
-                st.error(get_text('search_sync_error', lang).format(error=e))
+                st.error(f"❌ Error during library sync: {e}")
                 
         st.rerun() # Force rerun to clear spinner and update search page
 
@@ -42,15 +36,14 @@ def render(user):
     # --- SMART LOAD ---
     # Rule 6: Streamlit State (ensure library_cache is loaded once or cached)
     if 'library_cache' not in st.session_state or not st.session_state.library_cache:
-        with st.spinner(get_text('search_load_spinner', lang)):
+        with st.spinner("☁️ Φόρτωση Βιβλιοθήκης..."):
             try:
                 st.session_state.library_cache = srv.load_index()
                 if not st.session_state.library_cache:
-                    st.info(get_text('search_no_data', lang)) 
-                    logger.info("UI Search: No library data found, prompting user to sync.")
+                    st.info(f"ℹ️ {get_text('lic_admin_no_licenses', lang)} Πατήστε 'Sync' για αρχικοποίηση.") # Re-using key
             except Exception as e:
                 logger.error(f"UI Search: Error loading library index: {e}", exc_info=True)
-                st.error(get_text('search_sync_error', lang).format(error=e)) # Re-using key
+                st.error(f"❌ Error loading library index: {e}")
                 st.session_state.library_cache = [] # Ensure it's a list even on error
                 
     data = st.session_state.get('library_cache', [])
@@ -62,4 +55,4 @@ def render(user):
         core_render_search_page(data)
     except Exception as e:
         logger.error(f"UI Search: Error rendering search page: {e}", exc_info=True)
-        st.error(f"{get_text('general_ui_error', lang).format(error=e)}") # Κανόνας 5...
+        st.error(f"{get_text('general_ui_error', lang).format(error=e)}") # Κανόνας 5

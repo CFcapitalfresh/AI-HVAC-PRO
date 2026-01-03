@@ -6,92 +6,39 @@ diagnostic checklists.
 FEATURES:
 - Smart Model Discovery (No 404 errors)
 - Multi-language Support (Greek/English)
-- Centralized system checks
 """
 
 import google.generativeai as genai
 import json
 import logging
 import streamlit as st
-import pypdf # For PDF engine check
-from io import BytesIO # For PDF engine check
-
 from core.config_loader import ConfigLoader
-from core.ai_engine import AIEngine # Rule 3: Use central AI Engine
+from core.ai_engine import AIEngine # Import AIEngine to leverage its setup
 
 logger = logging.getLogger("Service.Diagnostics")
 
 class DiagnosticsService:
     def __init__(self):
-        # Rule 3: Use the central AIEngine instance.
-        # It handles its own setup and model discovery.
-        self.ai_engine = AIEngine() 
-        self.model = self.ai_engine.model # Get the already initialized model
+        # Leverage AIEngine for API key and model setup (Rule 3)
+        self.ai_engine = AIEngine()
         self.api_key = self.ai_engine.api_key
+        self.model = self.ai_engine.model
+        # The AIEngine already logs setup errors, so no need to duplicate here
 
-    def _get_best_model_name_internal(self) -> Optional[str]:
-        """Internal method to get the selected model name from AIEngine."""
-        if self.ai_engine and self.ai_engine.model:
-            return self.ai_engine.model.model_name
-        return None
-
-    def check_gemini_key(self) -> Dict[str, Any]:
-        """Checks if the Gemini API Key is available."""
-        if self.api_key:
-            mask = self.api_key[:5] + "..." + self.api_key[-4:]
-            return {"status": "success", "message": mask}
-        return {"status": "error", "message": "No API Key found."}
-
-    def test_ai_connection(self) -> Dict[str, Any]:
-        """Tests connection to Google AI and lists models."""
-        if not self.api_key:
-            return {"status": "error", "message": "API Key missing."}
-        
-        try:
-            # Re-configure genai just to be sure, though AIEngine already does it.
-            genai.configure(api_key=self.api_key) 
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            count = len(models)
-            return {"status": "success", "message": f"{count} models found."}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    def test_ai_generation(self) -> Dict[str, Any]:
-        """Tests a simple content generation from the active AI model."""
-        if not self.model:
-            return {"status": "error", "message": self.ai_engine.last_error or "AI Model not initialized."}
-        
-        try:
-            response = self.model.generate_content("Write the word 'OK'.")
-            if response.text:
-                return {"status": "success", "message": response.text.strip()}
-            return {"status": "warning", "message": "Empty response from AI."}
-        except Exception as e:
-            error_msg = str(e)
-            if "429" in error_msg: return {"status": "error", "message": "Quota Exceeded (429)."}
-            if "403" in error_msg or "API_KEY_INVALID" in error_msg: return {"status": "error", "message": "Invalid API Key."}
-            if "404" in error_msg: return {"status": "error", "message": "Model not found."}
-            return {"status": "error", "message": error_msg}
-
-    def check_pdf_engine(self) -> Dict[str, Any]:
-        """Checks if pypdf library can process PDFs."""
-        try:
-            # Test reading a tiny, empty PDF
-            pypdf.PdfReader(BytesIO(b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 0>>endobj\nxref\n0 3\n0000000000 65535 f\n0000000009 00000 n\n0000000055 00000 n\ntrailer<</Size 3/Root 1 0 R>>startxref\n104\n%%EOF"))
-            return {"status": "success", "message": "pypdf can read PDFs."}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-    def generate_checklist(self, error_code, manual_text="", lang="gr"):
+    def generate_checklist(self, error_code: str, manual_text: str = "", lang: str = "gr") -> Optional[Dict[str, Any]]:
         """
         Δημιουργεί λίστα ελέγχου (Checklist) σε μορφή JSON.
         Args:
             error_code: Ο κωδικός σφάλματος.
             manual_text: Context από το manual (αν υπάρχει).
             lang: 'gr' για Ελληνικά, 'en' για Αγγλικά.
+        Returns:
+            Optional[Dict[str, Any]]: The generated checklist as a dictionary, or None if failed.
         """
         if not self.model: 
-            st.error("❌ Το AI Model δεν έχει αρχικοποιηθεί.")
+            error_message = f"❌ Το AI Model δεν έχει αρχικοποιηθεί: {self.ai_engine.last_error or 'Unknown error'}"
+            st.error(error_message)
+            logger.error(error_message) # Rule 4
             return None
 
         # Επιλογή Γλώσσας Στόχου για το AI
@@ -102,7 +49,7 @@ class DiagnosticsService:
         TASK: Create a strictly structured troubleshooting checklist for the following issue.
         
         ISSUE/ERROR CODE: {error_code}
-        MANUAL CONTEXT: {manual_text[:5000]} (Use this if relevant)
+        MANUAL CONTEXT: {manual_text[:5000]} (Use this if relevant and available)
 
         CRITICAL LANGUAGE INSTRUCTION:
         The user speaks {target_lang_str}. 
@@ -138,6 +85,7 @@ class DiagnosticsService:
             text = response.text.strip()
             
             # --- ROBUST JSON PARSING ---
+            # Search for the first '{' and last '}' to handle potential preamble/postamble text
             start_idx = text.find('{')
             end_idx = text.rfind('}') + 1
             
@@ -145,11 +93,12 @@ class DiagnosticsService:
                 clean_json = text[start_idx:end_idx]
                 return json.loads(clean_json)
             else:
-                st.warning(f"⚠️ Invalid JSON from AI: {text[:100]}...")
-                logger.warning(f"Invalid JSON from AI in generate_checklist: {text}", exc_info=True)
+                logger.warning(f"⚠️ Invalid JSON from AI in Diagnostics: {text[:200]}...") # Rule 4
+                st.warning(f"⚠️ {st.session_state.get('lang', 'gr')}: {text[:100]}...")
                 return None
             
         except Exception as e:
-            st.error(f"❌ System Error ({type(e).__name__}): {str(e)}")
-            logger.error(f"Diagnostics Error during checklist generation: {e}", exc_info=True)
+            error_msg = f"❌ System Error ({type(e).__name__}): {str(e)}"
+            st.error(error_msg)
+            logger.error(f"Diagnostics Error during checklist generation: {e}", exc_info=True) # Rule 4
             return None

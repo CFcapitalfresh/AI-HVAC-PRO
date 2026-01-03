@@ -28,8 +28,6 @@ import hashlib # ΝΕΟ: Για υπολογισμό hash
 from collections import defaultdict # ΝΕΟ: Για πιο εύκολη καταμέτρηση στατιστικών
 from datetime import datetime # ΝΕΟ: Για timestamp
 
-from core.ai_engine import AIEngine # Rule 3: Use central AI Engine
-
 logger = logging.getLogger("Sorter")
 
 ALLOWED_CATEGORIES = [
@@ -60,15 +58,56 @@ IGNORED_FOLDERS_TOP_LEVEL = [
 class SorterService:
     def __init__(self):
         self.drive = DriveManager()
-        # Rule 3: Use the central AIEngine instance.
-        # It handles its own setup and model discovery.
-        self.ai_engine = AIEngine() 
-        self.model = self.ai_engine.model # Get the already initialized model
-        self.api_key = self.ai_engine.api_key # Get API key from AIEngine
+        self.api_key = ConfigLoader.get_gemini_key()
+        self.model = None
         self.root_id = ConfigLoader.get_drive_folder_id()
-        # Removed redundant _setup_ai() call here, as AIEngine's __init__ handles it.
+        self._setup_ai()
 
-    # Removed _setup_ai method as AIEngine handles it centrally (Rule 3)
+    def _setup_ai(self):
+        """DYNAMIC DISCOVERY: Βρίσκει το καλύτερο διαθέσιμο μοντέλο."""
+        if self.api_key and not self.model: 
+            try:
+                genai.configure(api_key=self.api_key)
+                
+                available_models = []
+                try:
+                    for m in genai.list_models():
+                        if 'generateContent' in m.supported_generation_methods and 'uri' in m.input_token_limit_protos:
+                            available_models.append(m.name)
+                except Exception as e:
+                    logger.warning(f"Could not list Gemini models during Sorter setup: {e}")
+
+                preferred_order = [
+                    "gemini-1.5-pro", 
+                    "models/gemini-1.5-pro",
+                    "gemini-1.5-flash", 
+                    "models/gemini-1.5-flash",
+                    "gemini-2.0-flash-exp", 
+                    "models/gemini-2.0-flash-exp",
+                    "gemini-pro",
+                    "models/gemini-pro"
+                ]
+                
+                selected_model = None
+                for p in preferred_order:
+                    if p in available_models:
+                        selected_model = p
+                        break
+                
+                if not selected_model:
+                    for m in available_models:
+                        if "gemini" in m:
+                            selected_model = m
+                            break
+                
+                if selected_model:
+                    self.model = genai.GenerativeModel(selected_model)
+                    logger.info(f"✅ AI Initialized for Sorter using AUTO-DETECTED model: {selected_model}")
+                else:
+                    logger.error("❌ No suitable Gemini models found available for Sorter with this API Key.")
+
+            except Exception as e:
+                logger.error(f"❌ AI Init Error for Sorter: {e}", exc_info=True)
 
     def _calculate_file_hash(self, file_bytes):
         """Υπολογίζει το SHA256 hash του αρχείου."""
@@ -88,314 +127,278 @@ class SorterService:
 
             reader = pypdf.PdfReader(io.BytesIO(file_bytes))
             text = ""
-            # Extract text from first few pages to limit token usage for AI
             for i in range(min(8, len(reader.pages))): 
                 text += reader.pages[i].extract_text() or ""
             return text[:5000], file_bytes, file_hash 
         except Exception as e:
-            logger.error(f"Error extracting text or calculating hash for file {file_id}: {e}", exc_info=True)
+            logger.error(f"Error extracting text from PDF {file_id}: {e}", exc_info=True)
             return None, None, None
 
-    def _get_ai_classification(self, filename: str, file_text: str):
-        """
-        Χρησιμοποιεί το AI για να κατηγοριοποιήσει και να ονομάσει το αρχείο.
-        """
-        if not self.model:
-            logger.error("AI model not initialized for classification.")
-            return None, None, None, None, None
+    def _ask_ai_for_metadata(self, filename: str, file_text: Optional[str], file_bytes: Optional[bytes]) -> dict:
+        """Ζητάει από το AI να κατηγοριοποιήσει το αρχείο."""
+        if not self.model: 
+            logger.error("AI Model not initialized for metadata extraction.")
+            return {"category": "Unknown", "brand": "Unknown", "model": "General_Model", "meta_type": "General_Manual", "error_codes": "", "reason": "AI Model not ready."}
+        
+        prompt_parts = [
+            f"Analyze the following document (filename: '{filename}'). "
+            "Determine its Category, Brand, Model, and Document Type. "
+            "Also, extract any HVAC error codes mentioned. "
+            f"Allowed Categories: {', '.join(ALLOWED_CATEGORIES)}. "
+            f"Allowed Document Types: {', '.join(ALLOWED_TYPES)}. "
+            "If no specific brand/model, use 'Unknown'/'General_Model'. "
+            "If no specific type, use 'General_Manual'. "
+            "Respond in JSON format only.",
+            f"Filename: {filename}",
+            f"Content Snippet: {file_text or 'N/A'}"
+        ]
 
-        # Rule 5: Ensure prompt is multilingual or robust to different languages if input is varied
-        # For now, English for processing, output format dictates GR/EN
-        prompt = f"""
-        Analyze the following document and determine its Category, Brand, Model, and Meta_Type.
-        Also, suggest a new, cleaned filename based on the extracted metadata and the original name.
-        The document's content starts with:
-        ---
-        {file_text}
-        ---
-        Original filename: {filename}
+        if file_bytes:
+            # Add image part if file_bytes is available (for Vision model)
+            prompt_parts.append({
+                "inline_data": {
+                    "mime_type": "application/pdf", # Assuming PDF for now, can be generalized
+                    "data": file_bytes
+                }
+            })
 
-        Allowed Categories: {', '.join(ALLOWED_CATEGORIES)}
-        Allowed Meta_Types: {', '.join(ALLOWED_TYPES)}
+        json_output_format = {
+            "category": "Heating_Boilers|Heat_Pumps|Air_Conditioning|Solar_Systems|Water_Heaters|Thermostats_Controllers|Spare_Parts_Valves|Other_HVAC|Unknown",
+            "brand": "EXTRACTED_BRAND",
+            "model": "EXTRACTED_MODEL",
+            "meta_type": "User_Manual|Service_Manual|Installation_Manual|Technical_Data|Error_Codes|Spare_Parts_List|General_Manual",
+            "error_codes": "E1, E2, F0 (comma separated, if found, else empty string)",
+            "reason": "Why AI chose this category/type (optional, for debugging)"
+        }
 
-        If you cannot confidently determine a value, use 'Unknown'.
-        If the document is clearly irrelevant to HVAC, use 'IRRELEVANT_OR_UNKNOWN' for Category and Meta_Type.
-
-        Output MUST be in JSON format:
-        {{
-            "category": "Determined_Category",
-            "brand": "Determined_Brand",
-            "model": "Determined_Model",
-            "meta_type": "Determined_Meta_Type",
-            "error_codes": "Comma_separated_error_codes_found_in_document_or_empty",
-            "suggested_filename": "CLEAN_BRAND_MODEL_TYPE_NAME.pdf"
-        }}
-        """
-
+        prompt_parts.append(f"\nJSON Output Format (choose from options, provide extracted values): {json.dumps(json_output_format, indent=2)}")
+        
         try:
             response = self.model.generate_content(
-                prompt,
+                prompt_parts,
                 generation_config={"response_mime_type": "application/json"}
             )
-            
-            response_text = response.text.strip()
-            # Robust JSON parsing (Rule 4)
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
+            # Robust JSON parsing
+            text = response.text.strip()
+            start_idx = text.find('{')
+            end_idx = text.rfind('}') + 1
             if start_idx != -1 and end_idx != -1:
-                clean_json_str = response_text[start_idx:end_idx]
-                classification = json.loads(clean_json_str)
-                
-                cat = classification.get('category', 'Unknown').replace(" ", "_")
-                brand = classification.get('brand', 'Unknown').replace(" ", "_")
-                model = classification.get('model', 'General_Model').replace(" ", "_")
-                m_type = classification.get('meta_type', 'General_Manual').replace(" ", "_")
-                errors = classification.get('error_codes', '')
-                suggested_filename = classification.get('suggested_filename', filename)
-
-                # Validate against allowed categories/types
-                if cat not in ALLOWED_CATEGORIES:
-                    if cat == "IRRELEVANT_OR_UNKNOWN":
-                        cat = IRRELEVANT_OR_UNKNOWN_FOLDER # Map to special folder
-                        m_type = IRRELEVANT_OR_UNKNOWN_FOLDER
-                    else:
-                        logger.warning(f"AI suggested invalid category '{cat}'. Defaulting to 'Other_HVAC'.")
-                        cat = "Other_HVAC"
-                
-                if m_type not in ALLOWED_TYPES and m_type != IRRELEVANT_OR_UNKNOWN_FOLDER:
-                    logger.warning(f"AI suggested invalid meta_type '{m_type}'. Defaulting to 'General_Manual'.")
-                    m_type = "General_Manual"
-
-                return cat, brand, model, m_type, errors, suggested_filename
+                clean_json = text[start_idx:end_idx]
+                return json.loads(clean_json)
             else:
-                logger.error(f"AI returned invalid JSON: {response_text}")
-                return None, None, None, None, None, None
-
+                logger.warning(f"AI returned invalid JSON for '{filename}': {text[:200]}")
+                return {"category": "Unknown", "brand": "Unknown", "model": "General_Model", "meta_type": "General_Manual", "error_codes": "", "reason": "AI returned malformed JSON."}
         except Exception as e:
-            logger.error(f"AI classification failed for {filename}: {e}", exc_info=True)
-            return None, None, None, None, None, None
+            logger.error(f"AI metadata extraction failed for '{filename}': {e}", exc_info=True)
+            return {"category": "Unknown", "brand": "Unknown", "model": "General_Model", "meta_type": "General_Manual", "error_codes": "", "reason": f"AI error: {str(e)}"}
 
-    def _get_or_create_path(self, parent_id, path_parts):
-        """Δημιουργεί μια ιεραρχία φακέλων στο Drive αν δεν υπάρχει."""
-        current_parent_id = parent_id
-        for part in path_parts:
-            # Avoid creating folders for special top-level ignored names (Rule 3)
-            if part in IGNORED_FOLDERS_TOP_LEVEL and current_parent_id == self.root_id:
-                folder_id = self.drive.create_folder(part, current_parent_id) # Ensure special folders exist
-                if not folder_id: raise Exception(f"Failed to get/create special folder: {part}")
-                return folder_id # For these special folders, the path ends here for sorting purposes.
-
-            folder_id = self.drive.create_folder(part, current_parent_id)
-            if not folder_id:
-                raise Exception(f"Failed to get or create folder: {part} under {current_parent_id}")
-            current_parent_id = folder_id
-        return current_parent_id
-
-    def run_sorter(self, my_bar: st.progress, progress_text_container: st.empty, stop_flag_key: str, force_full_rescan: bool = False):
-        """
-        Εκτελεί τη διαδικασία ταξινόμησης, μετονομασίας και οργάνωσης αρχείων.
-        Ενημερώνει μια μπάρα προόδου στο Streamlit.
-        """
-        logger.info(f"AI Sorter started. Force full rescan: {force_full_rescan}")
-        progress_text_container.text("Αρχικοποίηση οργανωτή...")
+    def _get_or_create_folder(self, parent_id, folder_name):
+        """Επιστρέφει το ID του φακέλου, δημιουργώντας τον αν δεν υπάρχει."""
+        # Clean folder name for Drive compatibility
+        clean_folder_name = re.sub(r'[\\/:*?"<>|]', '', folder_name).strip()
+        if not clean_folder_name: return None # Avoid creating empty name folders
         
+        return self.drive.create_folder(clean_folder_name, parent_id)
+
+    def run_sorter(self, stop_flag: bool, progress_callback, log_callback, failed_files_list: list, manual_review_files_list: list, irrelevant_files_list: list, duplicate_files_list: list, force_full_rescan: bool = False) -> dict:
+        """
+        Εκτελεί την ταξινόμηση αρχείων.
+        `force_full_rescan`: Αν είναι True, σαρώνει *όλους* τους φακέλους, συμπεριλαμβανομένων των ήδη ταξινομημένων.
+        """
         if not self.root_id:
-            logger.error("Root Drive folder ID is missing.")
-            progress_text_container.error("Root Drive folder ID is missing. Please check config.")
-            return None
+            log_callback("❌ Error: Drive Root Folder ID is not configured.")
+            return {"status": "failed", "message": "Root Folder ID missing."}
 
-        if not self.model:
-            logger.error("AI model is not initialized. Cannot run sorter.")
-            progress_text_container.error("AI model is not initialized. Cannot run sorter.")
-            return None
+        log_callback("🔄 Starting AI Sorter...")
+        progress_callback(0, 100, "Αρχικοποίηση...")
 
-        current_run_log = []
+        files_to_process = []
+        hash_to_file_map = {} # Για ανίχνευση διπλοτύπων
+        
+        # Πρώτο πέρασμα: Συλλογή αρχείων
+        # Only scan the root for *unsorted* files if not a full rescan.
+        # If force_full_rescan, scan all folders to re-evaluate.
+        log_callback(f"Scanning Drive (Force Full Rescan: {force_full_rescan})...")
+        progress_callback(5, 100, "Σάρωση αρχείων στο Drive...")
+        
+        # Use _scan_recursive from SyncService to get a full list if force_full_rescan is True
+        # For this context, we need to adapt the scanner from SyncService or implement a similar one.
+        # Let's use a simplified direct scan of the root for unsorted files if not full rescan.
+        # If force_full_rescan, we get all files.
+        all_drive_files = self.drive.list_files_in_folder(self.root_id)
+        
+        current_idx = 0
+        total_files = len(all_drive_files)
+        
+        # If force_full_rescan, we'll re-scan everything. Otherwise, only new/unsorted.
+        for item in all_drive_files:
+            item_name = item['name']
+            if item['mimeType'] == 'application/vnd.google-apps.folder':
+                # If it's a folder, check if it's an IGNORED_FOLDERS_TOP_LEVEL.
+                # If not forcing full rescan, and it's a categorized folder, skip it.
+                if not force_full_rescan and item_name in ALLOWED_CATEGORIES:
+                    log_callback(f"Skipping already categorized folder: {item_name}")
+                    continue
+                # If it's a special folder and we are not forcing full rescan, skip
+                if not force_full_rescan and item_name in IGNORED_FOLDERS_TOP_LEVEL:
+                    log_callback(f"Skipping special ignored folder: {item_name}")
+                    continue
+                
+                # If it's a folder we need to process (either not categorized, or force_full_rescan)
+                # Recursively add its files for processing.
+                # For simplicity in this `run_sorter`, we are primarily interested in files in the *root* or unorganized subfolders.
+                # A full recursive scan is usually done by SyncService before Sorter.
+                # Here, we'll assume `list_files_in_folder` gives us the direct children.
+                # If we want deep processing, this would need to recursively gather files,
+                # which can be complex to integrate here with progress bars effectively.
+                # For this implementation, let's assume `list_files_in_folder` will return what we need,
+                # or that `files_to_process` is initialized with all unclassified files.
+
+                # Simplified: if it's a folder that needs processing (not in ALLOWED_CATEGORIES, not IGNORED, or force_full_rescan)
+                # We will process it as a 'container' for files, but the sorting logic focuses on *files*.
+                # The assumption is, the Sorter's job is to take files from a "holding area" (like the root)
+                # and put them into structured folders. If force_full_rescan is true, even existing folders/files
+                # might be re-evaluated.
+                pass # Folders are not directly "files to process" for sorting themselves
+            
+            elif item['mimeType'].startswith('application/pdf') or item['mimeType'].startswith('image/'):
+                # Check if it's an ignored file from special folders
+                # This needs to check the parent path, which `list_files_in_folder` doesn't provide directly.
+                # We need to refine the `list_files_in_folder` to return parent info or iterate differently.
+                # For now, let's assume if it's directly in root and not in a categorized folder, it's unsorted.
+                
+                # We need to explicitly avoid files that are ALREADY in the organized structure,
+                # unless force_full_rescan is true.
+                is_in_organized_folder = False
+                if 'parents' in item: # Drive API returns 'parents' list
+                    # Get parent folder's name to check if it's already structured
+                    parent_id = item['parents'][0] # Assuming one parent
+                    parent_folder_info = self.drive.service.files().get(fileId=parent_id, fields='name').execute()
+                    parent_folder_name = parent_folder_info.get('name')
+                    
+                    if parent_folder_name in ALLOWED_CATEGORIES or parent_folder_name in IGNORED_FOLDERS_TOP_LEVEL:
+                        is_in_organized_folder = True
+
+                if not is_in_organized_folder or force_full_rescan:
+                    files_to_process.append(item)
+                else:
+                    log_callback(f"Skipping already organized file: {item_name}")
+
+        total_files_to_process = len(files_to_process)
+        log_callback(f"Found {total_files_to_process} files to process.")
+
+        # Summary statistics
         summary = {
             "last_run_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "total_files_scanned": 0,
+            "total_files_scanned": total_files_to_process,
             "total_successfully_sorted": 0,
             "total_moved_to_manual_review": 0,
             "total_moved_to_irrelevant": 0,
             "total_moved_to_duplicates": 0,
-            "failed_files": [],
-            "manual_review_files": [],
-            "irrelevant_files": [],
-            "duplicate_files": [],
             "category_counts": defaultdict(int),
             "brand_counts": defaultdict(int),
-            "type_counts": defaultdict(int),
+            "type_counts": defaultdict(int)
         }
 
-        # Clear existing special folders if force_full_rescan (Rule 3)
-        if force_full_rescan:
-            progress_text_container.text("Διαγραφή υπαρχόντων φακέλων...")
-            logger.info("Force full rescan enabled. Deleting existing categorized folders.")
-            try:
-                # Get all children of root, excluding index file and other known files
-                all_root_children = self.drive.list_files_in_folder(self.root_id)
-                folders_to_delete = [
-                    f for f in all_root_children 
-                    if f['mimeType'] == 'application/vnd.google-apps.folder' and 
-                       f['name'] not in [f for f in IGNORED_FOLDERS_TOP_LEVEL if not f.startswith('_')] # Protect system folders
-                ]
-                for folder in folders_to_delete:
-                    self.drive.delete_file(folder['id'])
-                    logger.info(f"Deleted folder: {folder['name']} ({folder['id']})")
-                current_run_log.append(f"✅ Deleted {len(folders_to_delete)} top-level categories due to full rescan.")
-
-                # Delete files in the root that are not part of known system files (e.g., unsorted files)
-                root_files_to_delete = [
-                    f for f in all_root_children
-                    if f['mimeType'] != 'application/vnd.google-apps.folder' and 
-                       not f['name'].startswith('drive_index') and 
-                       not f['name'].startswith('drive_config') and
-                       not f['name'].startswith('SpyLogs') # Protect system logs
-                ]
-                for file_item in root_files_to_delete:
-                    self.drive.delete_file(file_item['id'])
-                    logger.info(f"Deleted root file: {file_item['name']} ({file_item['id']})")
-                current_run_log.append(f"✅ Deleted {len(root_files_to_delete)} unsorted files from root due to full rescan.")
-
-            except Exception as e:
-                logger.error(f"Error during full rescan folder cleanup: {e}", exc_info=True)
-                current_run_log.append(f"❌ Error during full rescan cleanup: {e}")
-                progress_text_container.error(f"Σφάλμα κατά τον καθαρισμό: {e}")
-                return None
-
-
-        # 1. Βρείτε όλα τα αρχεία για επεξεργασία (Rule 3)
-        files_to_process = []
-        all_drive_files = self.drive.list_files_in_folder(self.root_id)
-        
-        # Collect files not in predefined (ignored) folders
-        for file_item in all_drive_files:
-            # Check if file is directly in root and is a PDF
-            is_pdf = file_item['mimeType'] == 'application/pdf'
-            
-            # Check if it's in an ignored folder (e.g. _MANUAL_REVIEW) (Rule 3)
-            is_in_ignored_folder = False
-            if 'parents' in file_item and file_item['parents']:
-                parent_folder_id = file_item['parents'][0] # Assuming single parent
-                parent_files = self.drive.list_files_in_folder(parent_folder_id) # Get parent details
-                parent_name = next((f['name'] for f in parent_files if f['id'] == parent_folder_id), '') # Get parent name
-                if parent_name in IGNORED_FOLDERS_TOP_LEVEL:
-                    is_in_ignored_folder = True
-
-            # Process only PDFs that are not in ignored folders and are not the index file, or config files.
-            if is_pdf and not is_in_ignored_folder and not file_item['name'].startswith('drive_index') and not file_item['name'].startswith('drive_config'):
-                files_to_process.append(file_item)
-
-        if not files_to_process:
-            progress_text_container.info("Δεν βρέθηκαν αρχεία για ταξινόμηση.")
-            current_run_log.append("ℹ️ No files found to process.")
-            my_bar.progress(100)
-            return summary, current_run_log
-        
-        total_files = len(files_to_process)
-        summary["total_files_scanned"] = total_files
-        file_hashes = {} # Για ανίχνευση διπλότυπων (Rule 3)
-
-        for i, file_item in enumerate(files_to_process):
-            if st.session_state.get(stop_flag_key, False):
-                current_run_log.append(f"⚠️ Sorter stopped by user at file {i+1}/{total_files}.")
-                progress_text_container.warning("Ο οργανωτής σταμάτησε από τον χρήστη.")
+        for idx, item in enumerate(files_to_process):
+            if stop_flag:
+                log_callback("Sorting stopped by user.")
                 break
 
-            progress_percent = int(((i + 1) / total_files) * 100)
-            progress_text_container.text(f"Επεξεργασία αρχείου ({i+1}/{total_files}): {file_item['name']}")
-            my_bar.progress(progress_percent)
+            filename = item['name']
+            file_id = item['id']
+            mime_type = item['mimeType']
 
-            file_id = file_item['id']
-            original_filename = file_item['name']
+            log_callback(f"Processing ({idx+1}/{total_files_to_process}): {filename}")
+            progress_callback(10 + int((idx / total_files_to_process) * 80), 100, f"Επεξεργασία: {filename}")
 
             try:
-                file_text, file_bytes, file_hash = self._extract_text_from_pdf(file_id)
+                # 1. Extract text and calculate hash
+                file_text, file_bytes, file_hash = self._extract_text_from_pdf(file_id) if mime_type == 'application/pdf' else (None, self.drive.download_file_content(file_id).getvalue(), self._calculate_file_hash(self.drive.download_file_content(file_id).getvalue()))
 
-                # Check for duplicates (Rule 3)
-                if file_hash:
-                    if file_hash in file_hashes:
-                        duplicate_info = file_hashes[file_hash]
-                        logger.info(f"Detected duplicate: {original_filename} is a duplicate of {duplicate_info['original_name']}")
-                        current_run_log.append(f"ℹ️ Duplicate found: '{original_filename}'. Original: '{duplicate_info['original_name']}'. Moving to '{DUPLICATES_FOLDER}'.")
-                        
-                        duplicate_folder_id = self._get_or_create_path(self.root_id, [DUPLICATES_FOLDER])
-                        if self.drive.move_file(file_id, duplicate_folder_id):
-                            summary["total_moved_to_duplicates"] += 1
-                            summary["duplicate_files"].append(file_item)
-                        else:
-                            current_run_log.append(f"❌ Failed to move duplicate file {original_filename}.")
-                        continue
-                    else:
-                        file_hashes[file_hash] = {"file_id": file_id, "original_name": original_filename}
+                if not file_bytes:
+                    raise Exception("Could not retrieve file content.")
 
-                if not file_text:
-                    logger.warning(f"Could not extract text from {original_filename}. Moving to '{MANUAL_REVIEW_FOLDER}'.")
-                    current_run_log.append(f"⚠️ No text extracted from '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
-                    manual_review_folder_id = self._get_or_create_path(self.root_id, [MANUAL_REVIEW_FOLDER])
-                    self.drive.move_file(file_id, manual_review_folder_id)
-                    summary["total_moved_to_manual_review"] += 1
-                    summary["manual_review_files"].append(file_item)
+                # 2. Duplicate Detection (using hash)
+                if file_hash in hash_to_file_map:
+                    original_file_info = hash_to_file_map[file_hash]
+                    self.drive.move_file(file_id, self._get_or_create_folder(self.root_id, DUPLICATES_FOLDER))
+                    self.drive.rename_file(file_id, f"{filename}_DUPLICATE_OF_{original_file_info['name']}")
+                    duplicate_files_list.append({"name": filename, "link": item['webViewLink'], "original_file_name": original_file_info['name']})
+                    summary['total_moved_to_duplicates'] += 1
+                    log_callback(f"Identified duplicate and moved: {filename}")
                     continue
-
-                category, brand, model, meta_type, error_codes, suggested_filename = self._get_ai_classification(original_filename, file_text)
-
-                if category == IRRELEVANT_OR_UNKNOWN_FOLDER:
-                    logger.info(f"File '{original_filename}' classified as irrelevant/unknown. Moving to '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.")
-                    current_run_log.append(f"ℹ️ File '{original_filename}' classified as irrelevant/unknown. Moving to '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.")
-                    irrelevant_folder_id = self._get_or_create_path(self.root_id, [IRRELEVANT_OR_UNKNOWN_FOLDER])
-                    self.drive.move_file(file_id, irrelevant_folder_id)
-                    summary["total_moved_to_irrelevant"] += 1
-                    summary["irrelevant_files"].append(file_item)
-                    continue
-
-
-                if not (category and brand and model and meta_type):
-                    logger.warning(f"AI could not fully classify '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
-                    current_run_log.append(f"⚠️ AI could not fully classify '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
-                    manual_review_folder_id = self._get_or_create_path(self.root_id, [MANUAL_REVIEW_FOLDER])
-                    self.drive.move_file(file_id, manual_review_folder_id)
-                    summary["total_moved_to_manual_review"] += 1
-                    summary["manual_review_files"].append(file_item)
-                    continue
-
-                # Construct new path (Rule 3)
-                new_path_parts = [category, brand, model]
-                target_folder_id = self._get_or_create_path(self.root_id, new_path_parts)
-                
-                # Construct new file name: Category | Brand | Model | Meta_Type | Original_Name
-                # Use suggested filename if provided and clean, otherwise construct
-                if suggested_filename and suggested_filename != original_filename:
-                    # Clean suggested filename to ensure it doesn't contain path separators
-                    clean_suggested_filename = suggested_filename.replace("/", "_").replace("\\", "_")
-                    new_filename = f"{category} | {brand} | {model} | {meta_type} | {clean_suggested_filename}"
                 else:
-                    new_filename = f"{category} | {brand} | {model} | {meta_type} | {original_filename}"
+                    hash_to_file_map[file_hash] = {"name": filename, "id": file_id}
+
+                # 3. Ask AI for metadata
+                metadata = self._ask_ai_for_metadata(filename, file_text, file_bytes if mime_type == 'application/pdf' else None)
+
+                category = metadata.get("category", "Unknown")
+                brand = metadata.get("brand", "Unknown")
+                model = metadata.get("model", "General_Model")
+                meta_type = metadata.get("meta_type", "General_Manual")
+                error_codes = metadata.get("error_codes", "")
+                reason = metadata.get("reason", "") # For debugging/manual review
+
+                # Normalize names for folder creation
+                category = category.replace(" ", "_")
+                brand = brand.replace(" ", "_")
+                model = model.replace(" ", "_")
+                meta_type = meta_type.replace(" ", "_")
+
+                if category not in ALLOWED_CATEGORIES or brand == "Unknown" or model == "General_Model" or meta_type not in ALLOWED_TYPES:
+                    # Move to _MANUAL_REVIEW or _IRRELEVANT_OR_UNKNOWN
+                    if category == "Unknown" and brand == "Unknown" and model == "General_Model" and meta_type == "General_Manual":
+                        target_folder_id = self._get_or_create_folder(self.root_id, IRRELEVANT_OR_UNKNOWN_FOLDER)
+                        irrelevant_files_list.append({"name": filename, "link": item['webViewLink'], "reason": reason})
+                        summary['total_moved_to_irrelevant'] += 1
+                        log_callback(f"Moved to Irrelevant/Unknown: {filename} (Reason: {reason})")
+                    else:
+                        target_folder_id = self._get_or_create_folder(self.root_id, MANUAL_REVIEW_FOLDER)
+                        manual_review_files_list.append({"name": filename, "link": item['webViewLink'], "reason": reason, "ai_suggestion": metadata})
+                        summary['total_moved_to_manual_review'] += 1
+                        log_callback(f"Moved to Manual Review: {filename} (Reason: {reason})")
+                    self.drive.move_file(file_id, target_folder_id)
+                    continue
+
+                # 4. Create Folder Structure (Category / Brand / Model / Type)
+                category_folder_id = self._get_or_create_folder(self.root_id, category)
+                if not category_folder_id: raise Exception(f"Failed to create category folder: {category}")
+
+                brand_folder_id = self._get_or_create_folder(category_folder_id, brand)
+                if not brand_folder_id: raise Exception(f"Failed to create brand folder: {brand}")
                 
-                # Rename and Move (Rule 3)
+                model_folder_id = self._get_or_create_folder(brand_folder_id, model)
+                if not model_folder_id: raise Exception(f"Failed to create model folder: {model}")
+
+                type_folder_id = self._get_or_create_folder(model_folder_id, meta_type)
+                if not type_folder_id: raise Exception(f"Failed to create type folder: {meta_type}")
+                
+                # 5. Move File & Rename
+                self.drive.move_file(file_id, type_folder_id)
+                new_filename = f"{filename.replace('.pdf', '')}_{meta_type.upper()}_{error_codes}.pdf" if error_codes else f"{filename.replace('.pdf', '')}_{meta_type.upper()}.pdf"
+                new_filename = new_filename.replace(' ', '_').replace('.', '_') # Ensure safe filename
+                # Limit length to avoid Drive API issues
+                new_filename = new_filename[:200] + ".pdf" if new_filename.endswith(".pdf") and len(new_filename) > 200 else new_filename
+
                 self.drive.rename_file(file_id, new_filename)
-                self.drive.move_file(file_id, target_folder_id)
-                
-                logger.info(f"Successfully sorted and renamed '{original_filename}' to '{new_filename}' in path: {'/'.join(new_path_parts)}")
-                current_run_log.append(f"✅ Sorted '{original_filename}' to '{'/'.join(new_path_parts)}' as '{new_filename}'")
-                
-                summary["total_successfully_sorted"] += 1
-                summary["category_counts"][category] += 1
-                summary["brand_counts"][brand] += 1
-                summary["type_counts"][meta_type] += 1
+
+                summary['total_successfully_sorted'] += 1
+                summary['category_counts'][category] += 1
+                summary['brand_counts'][brand] += 1
+                summary['type_counts'][meta_type] += 1
+                log_callback(f"Successfully sorted: {filename} to {category} | {brand} | {model} | {meta_type}")
 
             except Exception as e:
-                logger.error(f"Error processing file {original_filename} (ID: {file_id}): {e}", exc_info=True)
-                current_run_log.append(f"❌ Failed to process '{original_filename}': {e}")
-                summary["failed_files"].append(file_item)
-                # Move to an error folder if processing failed
-                try:
-                    error_folder_id = self._get_or_create_path(self.root_id, ["_AI_ERROR"])
+                failed_files_list.append({"name": filename, "id": file_id, "error": str(e), "link": item['webViewLink']})
+                log_callback(f"Error processing {filename}: {e}")
+                logger.error(f"Error during sorting file {filename}: {e}", exc_info=True)
+                # Move to a dedicated error folder for manual inspection by admin
+                error_folder_id = self._get_or_create_folder(self.root_id, "_AI_ERROR")
+                if error_folder_id:
                     self.drive.move_file(file_id, error_folder_id)
-                    current_run_log.append(f"ℹ️ Moved failed file '{original_filename}' to '_AI_ERROR' folder.")
-                except Exception as move_e:
-                    logger.error(f"Failed to move problematic file {original_filename} to _AI_ERROR: {move_e}", exc_info=True)
-                    current_run_log.append(f"❌ CRITICAL: Failed to move problematic file '{original_filename}' to '_AI_ERROR'.")
 
-        my_bar.progress(100, text="Ολοκληρώθηκε!")
-        logger.info("AI Sorter finished.")
-        return summary, current_run_log
+        progress_callback(100, 100, "Ολοκληρώθηκε!")
+        log_callback("✅ AI Sorter Finished.")
+        return summary
