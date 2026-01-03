@@ -1,0 +1,18 @@
+{
+  "system": {
+    "name": "Φωνητικό Σύστημα Εντολών",
+    "version": "1.0.0",
+    "author": "Μαστρο-Νεκ"
+  },
+  "settings": {
+    "default_language": "el-GR",
+    "speech_rate": 150,
+    "speech_volume": 0.9,
+    "listen_timeout": 5,
+    "phrase_time_limit": 10
+  },
+  "commands": {
+    "basic": ["βοήθεια", "ώρα", "ημερομηνία", "σταμάτα", "τερματισμός"],
+    "advanced": ["επανάλαβε", "εκκαθάρισε", "λίστα", "προσαρμοσμένη"]
+  }
+}

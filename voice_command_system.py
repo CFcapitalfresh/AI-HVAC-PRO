@@ -52,61 +52,52 @@ class VoiceCommandSystem:
     def _register_default_commands(self):
         """Εγγραφή προεπιλεγμένων εντολών"""
         
-        def greet_command():
-            """Εντολή χαιρετισμού"""
-            responses = [
-                "Γεια σου! Πώς μπορώ να βοηθήσω;",
-                "Χαίρω πολύ! Είμαι στη διάθεσή σου.",
-                "Γεια! Έτοιμος για εντολές."
-            ]
-            import random
-            self.speak(random.choice(responses))
+        def help_command():
+            """Εντολή βοήθειας"""
+            commands_list = "\n".join([f"- {cmd}" for cmd in self.commands.keys()])
+            response = f"Διαθέσιμες εντολές:\n{commands_list}"
+            self.speak(response)
             
         def time_command():
             """Εντολή ώρας"""
-            now = datetime.now()
-            time_str = now.strftime("%H:%M")
-            self.speak(f"Η ώρα είναι {time_str}")
+            current_time = datetime.now().strftime("%H:%M")
+            self.speak(f"Η ώρα είναι {current_time}")
+            
+        def date_command():
+            """Εντολή ημερομηνίας"""
+            current_date = datetime.now().strftime("%d/%m/%Y")
+            self.speak(f"Η ημερομηνία είναι {current_date}")
             
         def stop_command():
-            """Διακοπή ακρόασης"""
+            """Εντολή διακοπής"""
             self.speak("Διακόπτω την ακρόαση")
             self.is_listening = False
             
-        def help_command():
-            """Βοήθεια για διαθέσιμες εντολές"""
-            available_commands = "\n".join([f"- {cmd}" for cmd in self.commands.keys()])
-            self.speak(f"Διαθέσιμες εντολές: {available_commands}")
-        
         # Εγγραφή εντολών
-        self.register_command("γεια", greet_command)
-        self.register_command("χαιρετισμός", greet_command)
-        self.register_command("ώρα", time_command)
-        self.register_command("πόση ώρα είναι", time_command)
-        self.register_command("σταμάτα", stop_command)
-        self.register_command("διακοπή", stop_command)
         self.register_command("βοήθεια", help_command)
-        self.register_command("εντολές", help_command)
+        self.register_command("ώρα", time_command)
+        self.register_command("ημερομηνία", date_command)
+        self.register_command("σταμάτα", stop_command)
+        self.register_command("τερματισμός", stop_command)
         
-    def register_command(self, phrase: str, function: Callable):
+    def register_command(self, trigger: str, function: Callable):
         """
         Εγγραφή νέας εντολής
         
         Args:
-            phrase: Η φράση που ενεργοποιεί την εντολή
-            function: Η συνάρτηση που θα εκτελεστεί
+            trigger: Λέξη-κλειδί για ενεργοποίηση
+            function: Συνάρτηση που θα εκτελεστεί
         """
-        self.commands[phrase.lower()] = function
-        print(f"📝 Εγγράφηκε εντολή: '{phrase}'")
+        self.commands[trigger.lower()] = function
         
     def speak(self, text: str):
         """
         Ομιλία κειμένου
         
         Args:
-            text: Το κείμενο προς ομιλία
+            text: Κείμενο προς ομιλία
         """
-        print(f"🔊: {text}")
+        print(f"Σύστημα: {text}")
         self.engine.say(text)
         self.engine.runAndWait()
         
@@ -122,9 +113,9 @@ class VoiceCommandSystem:
             Το αναγνωρισμένο κείμενο ή None
         """
         with sr.Microphone() as source:
-            print("🎤 Ακούω... (μιλήστε τώρα)")
+            print("Ακούω...")
             
-            # Ρύθμιση για περιβαλλοντικό θόρυβο
+            # Προσαρμογή για θόρυβο
             self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
             
             try:
@@ -134,20 +125,25 @@ class VoiceCommandSystem:
                     phrase_time_limit=phrase_time_limit
                 )
                 
-                print("🔍 Αναγνώριση...")
-                text = self.recognizer.recognize_google(audio, language=self.language)
-                text = text.lower()
-                print(f"📝 Αναγνωρίστηκε: '{text}'")
-                return text
+                # Αναγνώριση ομιλίας
+                text = self.recognizer.recognize_google(
+                    audio, 
+                    language=self.language
+                )
+                
+                print(f"Αναγνώρισα: {text}")
+                return text.lower()
                 
             except sr.WaitTimeoutError:
-                print("⏰ Δεν ανιχνεύθηκε ομιλία")
+                print("Χρονικό όριο αναμονής")
                 return None
             except sr.UnknownValueError:
-                print("❌ Δεν κατάφερα να αναγνωρίσω την ομιλία")
+                print("Δεν κατάλαβα τι είπες")
+                self.speak("Δεν κατάλαβα, παρακαλώ επανέλαβε")
                 return None
             except sr.RequestError as e:
-                print(f"⚠️ Σφάλμα σύνδεσης: {e}")
+                print(f"Σφάλμα σύνδεσης: {e}")
+                self.speak("Πρόβλημα σύνδεσης")
                 return None
                 
     def process_command(self, text: str) -> bool:
@@ -158,194 +154,203 @@ class VoiceCommandSystem:
             text: Το αναγνωρισμένο κείμενο
             
         Returns:
-            True αν βρέθηκε και εκτελέστηκε εντολή
+            True αν βρέθηκε εντολή, False διαφορετικά
         """
         if not text:
             return False
             
-        # Έλεγχος για ακριβή αντιστοίχιση
-        if text in self.commands:
-            self.commands[text]()
-            return True
-            
-        # Έλεγχος για μερική αντιστοίχιση
-        for command_phrase, command_func in self.commands.items():
-            if command_phrase in text:
-                command_func()
+        # Έλεγχος για κάθε εντολή
+        for trigger, command_func in self.commands.items():
+            if trigger in text:
+                print(f"Εκτέλεση εντολής: {trigger}")
+                
+                # Προσθήκη στην ουρά για ασύγχρονη εκτέλεση
+                self.command_queue.put((command_func, text))
                 return True
                 
         # Αν δεν βρέθηκε εντολή
-        self.speak(f"Δεν βρήκα εντολή για: '{text}'. Πες 'βοήθεια' για τις διαθέσιμες εντολές.")
+        self.speak(f"Δεν βρήκα εντολή για: {text}")
         return False
         
+    def command_worker(self):
+        """Εργαζόμενος για επεξεργασία εντολών από την ουρά"""
+        while self.is_listening or not self.command_queue.empty():
+            try:
+                command_func, text = self.command_queue.get(timeout=1)
+                command_func()
+                self.command_queue.task_done()
+            except queue.Empty:
+                continue
+                
     def start_listening_loop(self):
-        """Έναρξη συνεχούς ακρόασης"""
+        """
+        Κύριος βρόχος ακρόασης
+        """
         self.is_listening = True
-        self.speak("Έναρξη συστήματος φωνητικών εντολών")
+        
+        # Εκκίνηση εργαζομένου για εντολές
+        worker_thread = threading.Thread(target=self.command_worker)
+        worker_thread.daemon = True
+        worker_thread.start()
+        
+        self.speak("Σύστημα φωνητικών εντολών ενεργοποιημένο. Πες 'βοήθεια' για διαθέσιμες εντολές.")
         
         while self.is_listening:
+            # Ακρόαση εντολής
             text = self.listen()
+            
+            # Επεξεργασία αν υπάρχει κείμενο
             if text:
                 self.process_command(text)
                 
-    def start_background_listening(self):
-        """Έναρξη ακρόασης σε background thread"""
-        def listening_thread():
-            self.start_listening_loop()
-            
-        thread = threading.Thread(target=listening_thread, daemon=True)
-        thread.start()
-        return thread
+        print("Σύστημα απενεργοποιημένο")
         
-    def add_custom_command(self, phrase: str, action_type: str, **kwargs):
+    def run_single_command(self):
         """
-        Προσθήκη προσαρμοσμένης εντολής
+        Εκτέλεση μίας εντολής
+        """
+        self.speak("Πες την εντολή σου")
+        text = self.listen()
+        
+        if text:
+            if not self.process_command(text):
+                self.speak("Δεν βρήκα κατάλληλη εντολή")
+                
+    def save_commands(self, filename: str = "commands.json"):
+        """
+        Αποθήκευση εντολών σε αρχείο
         
         Args:
-            phrase: Η φράση ενεργοποίησης
-            action_type: Τύπος ενέργειας ('speak', 'open_url', 'run_script')
-            **kwargs: Παράμετροι για την ενέργεια
+            filename: Όνομα αρχείου
         """
-        
-        def custom_speak():
-            """Ενέργεια ομιλίας"""
-            message = kwargs.get('message', 'Εκτέλεση εντολής')
-            self.speak(message)
-            
-        def open_url():
-            """Ενέργεια άνοιγματος URL"""
-            import webbrowser
-            url = kwargs.get('url', 'https://www.google.com')
-            webbrowser.open(url)
-            self.speak(f"Άνοιξα το {url}")
-            
-        def run_script():
-            """Ενέργεια εκτέλεσης script"""
-            script_path = kwargs.get('script_path')
-            if script_path and os.path.exists(script_path):
-                os.system(f"python {script_path}")
-                self.speak("Εκτέλεση script ολοκληρώθηκε")
-            else:
-                self.speak("Το script δεν βρέθηκε")
-        
-        # Αντιστοίχιση τύπων ενεργειών
-        action_map = {
-            'speak': custom_speak,
-            'open_url': open_url,
-            'run_script': run_script
-        }
-        
-        if action_type in action_map:
-            self.register_command(phrase, action_map[action_type])
-            print(f"✅ Προστέθηκε προσαρμοσμένη εντολή: {phrase}")
-        else:
-            print(f"❌ Άγνωστος τύπος ενέργειας: {action_type}")
-            
-    def save_configuration(self, filename: str = "voice_commands_config.json"):
-        """Αποθήκευση ρυθμίσεων"""
-        config = {
-            'language': self.language,
-            'registered_commands': list(self.commands.keys()),
-            'timestamp': datetime.now().isoformat()
+        # Μετατροπή σε λίστα για αποθήκευση
+        commands_data = {
+            "language": self.language,
+            "commands": list(self.commands.keys())
         }
         
         with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+            json.dump(commands_data, f, ensure_ascii=False, indent=2)
             
-        print(f"💾 Αποθηκεύτηκε η διαμόρφωση στο {filename}")
+        print(f"Εντολές αποθηκεύτηκαν στο {filename}")
         
-    def load_configuration(self, filename: str = "voice_commands_config.json"):
-        """Φόρτωση ρυθμίσεων"""
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                
-            self.language = config.get('language', self.language)
-            print(f"📂 Φορτώθηκε διαμόρφωση από {filename}")
-            
-        except FileNotFoundError:
-            print(f"⚠️ Το αρχείο {filename} δεν βρέθηκε")
-
-
-class CommandManager:
-    """
-    Διαχειριστής εντολών για επέκταση λειτουργιών
-    """
-    
-    def __init__(self, voice_system: VoiceCommandSystem):
-        self.voice_system = voice_system
-        self.command_history = []
-        
-    def execute_with_feedback(self, phrase: str, func: Callable, *args, **kwargs):
+    def load_commands(self, filename: str = "commands.json"):
         """
-        Εκτέλεση εντολής με ανατροφοδότηση
+        Φόρτωση εντολών από αρχείο
         
         Args:
-            phrase: Η φράση που ενεργοποίησε την εντολή
-            func: Η συνάρτηση προς εκτέλεση
+            filename: Όνομα αρχείου
         """
         try:
-            # Προσθήκη στο ιστορικό
-            self.command_history.append({
-                'phrase': phrase,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'executing'
-            })
+            with open(filename, 'r', encoding='utf-8') as f:
+                commands_data = json.load(f)
+                
+            print(f"Φορτώθηκαν {len(commands_data.get('commands', []))} εντολές")
             
-            # Εκτέλεση
-            result = func(*args, **kwargs)
+        except FileNotFoundError:
+            print(f"Το αρχείο {filename} δεν βρέθηκε")
+
+
+class AdvancedVoiceAssistant(VoiceCommandSystem):
+    """
+    Προχωρημένος βοηθός με επιπλέον λειτουργίες
+    """
+    
+    def __init__(self, language: str = "el-GR"):
+        super().__init__(language)
+        self.conversation_history = []
+        self.user_preferences = {}
+        
+        # Εγγραφή πρόσθετων εντολών
+        self._register_advanced_commands()
+        
+    def _register_advanced_commands(self):
+        """Εγγραφή προχωρημένων εντολών"""
+        
+        def repeat_command():
+            """Επανάληψη τελευταίας εντολής"""
+            if self.conversation_history:
+                last_command = self.conversation_history[-1]
+                self.speak(f"Επανάληψη: {last_command}")
+            else:
+                self.speak("Δεν υπάρχει προηγούμενη εντολή")
+                
+        def clear_history_command():
+            """Εκκαθάριση ιστορικού"""
+            self.conversation_history.clear()
+            self.speak("Ιστορικό εκκαθαρισμένο")
             
-            # Ενημέρωση ιστορικού
-            self.command_history[-1]['status'] = 'completed'
-            self.command_history[-1]['result'] = str(result)
+        def list_commands_command():
+            """Λίστα όλων των εντολών"""
+            commands = ", ".join(self.commands.keys())
+            self.speak(f"Όλες οι εντολές: {commands}")
             
-            return result
+        # Εγγραφή νέων εντολών
+        self.register_command("επανάλαβε", repeat_command)
+        self.register_command("εκκαθάρισε", clear_history_command)
+        self.register_command("λίστα", list_commands_command)
+        
+    def process_command(self, text: str) -> bool:
+        """
+        Βελτιωμένη επεξεργασία εντολών με ιστορικό
+        """
+        # Αποθήκευση στο ιστορικό
+        self.conversation_history.append(text)
+        
+        # Κρατάμε μόνο τις τελευταίες 50 εντολές
+        if len(self.conversation_history) > 50:
+            self.conversation_history.pop(0)
             
-        except Exception as e:
-            # Καταγραφή σφάλματος
-            self.command_history[-1]['status'] = 'failed'
-            self.command_history[-1]['error'] = str(e)
-            self.voice_system.speak(f"Σφάλμα κατά την εκτέλεση: {str(e)}")
-            raise
+        # Κλήση της βασικής μεθόδου
+        return super().process_command(text)
 
 
 def main():
     """
-    Κύρια λειτουργία συστήματος
+    Κύρια συνάρτηση εκτέλεσης
     """
-    print("=" * 50)
-    print("ΣΥΣΤΗΜΑ ΦΩΝΗΤΙΚΩΝ ΕΝΤΟΛΩΝ")
-    print("Αρχιτεκτονική: Μαστρο-Νεκ")
-    print("=" * 50)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Σύστημα Φωνητικών Εντολών")
+    parser.add_argument("--mode", choices=["single", "continuous"], 
+                       default="continuous", help="Λειτουργία λειτουργίας")
+    parser.add_argument("--language", default="el-GR", 
+                       help="Γλώσσα αναγνώρισης")
+    parser.add_argument("--advanced", action="store_true",
+                       help="Χρήση προχωρημένου βοηθού")
+    
+    args = parser.parse_args()
     
     # Δημιουργία συστήματος
-    system = VoiceCommandSystem(language="el-GR")
+    if args.advanced:
+        assistant = AdvancedVoiceAssistant(language=args.language)
+    else:
+        assistant = VoiceCommandSystem(language=args.language)
     
-    # Προσθήκη προσαρμοσμένων εντολών (παράδειγμα)
-    system.add_custom_command(
-        phrase="άνοιξε το google",
-        action_type="open_url",
-        url="https://www.google.com"
-    )
+    # Προσθήκη παραδειγματικής εντολής
+    def custom_command():
+        assistant.speak("Εκτέλεση προσαρμοσμένης εντολής!")
+        
+    assistant.register_command("προσαρμοσμένη", custom_command)
     
-    system.add_custom_command(
-        phrase="πες κάτι",
-        action_type="speak",
-        message="Αυτό είναι ένα προσαρμοσμένο μήνυμα!"
-    )
-    
-    # Εκκίνηση συστήματος
-    print("\n🔊 Το σύστημα είναι έτοιμο!")
-    print("Διαθέσιμες εντολές:")
-    for cmd in system.commands.keys():
-        print(f"  • {cmd}")
-    
-    print("\n🎯 Πες 'βοήθεια' για λίστα εντολών")
-    print("🎯 Πες 'σταμάτα' για τερματισμό")
+    print("=" * 50)
+    print("ΣΥΣΤΗΜΑ ΦΩΝΗΤΙΚΩΝ ΕΝΤΟΛΩΝ")
+    print(f"Γλώσσα: {args.language}")
+    print(f"Λειτουργία: {args.mode}")
+    print(f"Εντολές: {len(assistant.commands)}")
     print("=" * 50)
     
-    # Έναρξη ακρόασης
-    system.start_listening_loop()
+    # Εκτέλεση
+    try:
+        if args.mode == "single":
+            assistant.run_single_command()
+        else:
+            assistant.start_listening_loop()
+            
+    except KeyboardInterrupt:
+        print("\nΤερματισμός από χρήστη")
+        assistant.is_listening = False
+        assistant.speak("Αποσύνδεση")
 
 
 if __name__ == "__main__":
