@@ -28,22 +28,24 @@ def render(user):
     # We create it here to ensure the logic below uses the service layer.
     session_srv = ChatSessionService()
     drive = DriveManager()
-    
+
     st.header(get_text('menu_chat', lang))
 
     # --- DEVICE CONTEXT (SIDEBAR/TOP) ---
+    # Κανόνας 5: Χρήση get_text για labels
+    # Κανόνας 6: Έλεγχος initialization keys (μέσω των key arguments)
     with st.container(border=True):
         col1, col2, col3 = st.columns([2, 2, 3])
         # Get brands from the service layer, which uses the library cache
         brands = ["-"] + session_srv.get_brands()
-        
+
         # Labels από το Language Pack
         lbl_brand = get_text('brand_label', lang) or "Brand"
         lbl_model = get_text('model_label', lang) or "Model"
-        
+
         selected_brand = col1.selectbox(lbl_brand, brands, key="ctx_brand")
         selected_model = col2.text_input(lbl_model, key="ctx_model")
-        
+
         # 1. Βρες τα manuals για την τρέχουσα επιλογή
         initial_manuals = []
         if selected_brand != "-":
@@ -69,22 +71,21 @@ def render(user):
             col3.info(msg)
 
     st.divider()
-    
-    # Init Chat History
+
+    # Init Chat History (Rule 6: Streamlit State)
     if "messages" not in st.session_state: st.session_state.messages = []
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     # --- INPUT AREA (TABS) ---
+    # Κανόνας 5: Μετάφραση ονομάτων tabs
     t_text = get_text('chat_tab_text', lang) or "⌨️ Text"
     t_voice = get_text('chat_tab_voice', lang) or "🎙️ Voice"
     t_upload = get_text('chat_tab_upload', lang) or "📎 Upload"
-    
-    # Use columns for a more compact layout, or tabs if preferred.
-    # Let's keep tabs for better separation as per the provided context code, but refactor the logic.
+
     tab_txt, tab_mic, tab_up = st.tabs([t_text, t_voice, t_upload])
-    
+
     user_prompt = None
     uploaded_pdfs = [] # New list for uploads from tab
     uploaded_imgs = [] # New list for image uploads
@@ -95,7 +96,7 @@ def render(user):
         prompt = st.chat_input(ph, key="chat_text_in")
         if prompt: user_prompt = prompt
 
-    # 2. Voice Input (Placeholder)
+    # 2. Voice Input (Placeholder) (Rule 1: Microphone/Audio)
     with tab_mic:
         st.info(get_text('chat_voice_under_dev', lang))
         if mic_recorder:
@@ -105,9 +106,9 @@ def render(user):
                 st.info(get_text('voice_input_activated', lang) or "Audio received.")
                 # Future logic for Speech-to-Text conversion here
         else:
-            st.caption("Missing mic recorder library.")
+            st.caption("Missing mic recorder library.") # Placeholder for missing library error handling
 
-    # 3. File Upload (for context)
+    # 3. File Upload (for context) (Rule 2: PDF Upload)
     with tab_up:
         st.info(get_text('chat_upload_instructions', lang))
         uploaded_pdfs = st.file_uploader(
@@ -124,26 +125,24 @@ def render(user):
         )
 
     # --- PROCESS INPUT AND GENERATE RESPONSE ---
-    # We process the prompt if either text input or uploads were provided, or both.
-    # The `user_prompt` is handled by chat_input, which auto-submits on enter/button press.
     if user_prompt:
         # A. Εμφάνιση μηνύματος χρήστη
         display_msg = user_prompt
+        # Κανόνας 5: Μετάφραση μηνυμάτων
         if uploaded_pdfs:
             display_msg += f"\n\n📎 *{get_text('chat_uploaded_content_preview', lang)} ({len(uploaded_pdfs)} PDFs)*"
         if uploaded_imgs:
             display_msg += f"\n\n📸 *{get_text('chat_uploaded_content_preview', lang)} ({len(uploaded_imgs)} Images)*"
-        
+
         st.session_state.messages.append({"role": "user", "content": display_msg})
         with st.chat_message("user"): st.markdown(display_msg)
 
-        # B. AI Processing with potential file context
+        # B. AI Processing with potential file context (Rule 4: Error Handling)
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             lbl_analyzing = get_text('analyzing', lang) or "Analyzing data and manuals..."
-            
+
             # --- STEP 1: Get prioritized manual content from library (if brand selected) ---
-            # Re-fetch based on current user query for better sorting (intent-driven)
             manual_file_content = None
             if selected_brand != "-":
                 final_manuals = session_srv.get_prioritized_manuals(selected_brand, selected_model, user_query=user_prompt)
@@ -152,6 +151,7 @@ def render(user):
                     with st.spinner(f"{lbl_analyzing} (Loading manual: {top_doc.get('name', 'N/A')})..."):
                         try:
                             # Use the service layer method to download and extract text
+                            # (Rule 3: Modularity - call service, not core logic directly)
                             manual_file_content = session_srv.get_manual_content_from_id(top_doc['file_id'])
                         except Exception as e:
                             logger.error(f"Error loading manual from library for chat: {e}", exc_info=True)
@@ -160,8 +160,6 @@ def render(user):
             # --- STEP 2: Call service layer with all context ---
             with st.spinner(f"{lbl_analyzing} (AI Generation)..."):
                 try:
-                    # **Architectural Fix:** Call the service layer's method (smart_solve)
-                    # The service layer (services/chat_session.py) handles preparing the full content for the AI engine.
                     resp = session_srv.smart_solve(
                         user_query=user_prompt,
                         uploaded_pdfs=uploaded_pdfs,
@@ -170,7 +168,7 @@ def render(user):
                         lang=lang,
                         manual_file_content=manual_file_content # Pass content of the top library manual
                     )
-                    
+
                     # C. Display response and save to history
                     response_placeholder.markdown(resp)
                     st.session_state.messages.append({"role": "assistant", "content": resp})

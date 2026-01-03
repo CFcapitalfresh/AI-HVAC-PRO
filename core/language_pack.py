@@ -1,172 +1,109 @@
-### FILE: services/chat_session.py
 """
-SERVICE: CHAT SESSION (INTENT AWARE)
-------------------------------------
-Sorts manuals based on user query keywords.
+CORE: LANGUAGE PACK
+-------------------
+Centralizes all text strings for multilingual support.
 """
-import streamlit as st
-from services.sync_service import SyncService
-from core.drive_manager import DriveManager
-from core.ai_engine import AIEngine
-from typing import List, Dict, Any, Optional
-import logging
-import io
-from pypdf import PdfReader
 
-logger = logging.getLogger("Service.ChatSession")
+TRANS = {
+    # --- GENERAL UI ---
+    'app_title': {'gr': "Mastro Nek AI | Platinum", 'en': "Mastro Nek AI | Platinum"},
+    'menu_header': {'gr': "Πλοήγηση", 'en': "Navigation"},
+    'menu_dashboard': {'gr': "📊 Επισκόπηση", 'en': "📊 Dashboard"},
+    'menu_chat': {'gr': "💬 AI Συνομιλία", 'en': "💬 AI Chat"},
+    'menu_library': {'gr': "🔎 Βιβλιοθήκη Manuals", 'en': "🔎 Manuals Library"},
+    'menu_organizer': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
+    'menu_clients': {'gr': "📇 Πελατολόγιο", 'en': "📇 Client CRM"},
+    'menu_tools': {'gr': "🛠️ Εργαλεία", 'en': "🛠️ Tools"},
+    'menu_admin': {'gr': "⚙️ Διαχείριση", 'en': "⚙️ Admin Panel"},
+    'logout': {'gr': "🚪 Αποσύνδεση", 'en': "🚪 Logout"},
+    'new_chat_side': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
 
-class ChatSessionService:
-    def __init__(self):
-        self.sync = SyncService()
-        self.drive = DriveManager()
-        self.ai_engine = AIEngine()
-        if 'library_cache' not in st.session_state:
-            st.session_state.library_cache = self.sync.load_index()
-        logger.info("ChatSessionService initialized.")
+    # --- DASHBOARD ---
+    'dash_welcome': {'gr': "👋 Καλωσήρθες", 'en': "👋 Welcome"},
+    'dash_subtitle': {'gr': "Κέντρο Ελέγχου Τεχνικής Υποστήριξης", 'en': "Technical Support Control Center"},
+    'dash_quick': {'gr': "🚀 Γρήγορες Ενέργειες", 'en': "🚀 Quick Actions"},
+    'dash_chat_card': {'gr': "AI Τεχνικός Βοηθός", 'en': "AI Technical Assistant"},
+    'dash_chat_desc': {'gr': "Διάγνωση βλαβών & Λύσεις", 'en': "Diagnosis & Solutions"},
+    'dash_btn_chat': {'gr': "💬 Έναρξη Συνομιλίας", 'en': "💬 Start Chat"},
+    'dash_lib_card': {'gr': "Βιβλιοθήκη Manuals", 'en': "Manuals Library"},
+    'dash_lib_desc': {'gr': "Αναζήτηση Εγχειριδίων", 'en': "Search Manuals"},
+    'dash_btn_lib': {'gr': "🔎 Αναζήτηση", 'en': "🔎 Search"},
+    'dash_tool_card': {'gr': "Εργαλεία HVAC", 'en': "HVAC Tools"},
+    'dash_tool_desc': {'gr': "BTU Calc & Μετατροπές", 'en': "BTU Calc & Converters"},
+    'dash_btn_tool': {'gr': "🛠️ Άνοιγμα Εργαλείων", 'en': "🛠️ Open Tools"},
+    'dash_status': {'gr': "Κατάσταση Συστήματος: 🟢 Online | AI Engine: Ready", 'en': "System Status: 🟢 Online | AI Engine: Ready"},
 
-    def get_brands(self):
-        """Επιστρέφει τις μάρκες."""
-        data = st.session_state.get('library_cache', [])
-        brands = set()
-        for item in data:
-            brand = item.get('brand', '') # Use extracted metadata field directly
-            if brand and brand != 'UNKNOWN': brands.add(brand)
-        return sorted(list(brands))
+    # --- CHAT & MEDIA ---
+    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα...", 'en': "Describe the issue..."},
+    'chat_thinking': {'gr': "🤔 Ο Mastro Nek αναλύει...", 'en': "🤔 Mastro Nek is thinking..."},
+    'chat_intro': {'gr': "👋 Γεια σου! Ρώτησέ με για βλάβες ή manuals.", 'en': "👋 Hello! Ask me about faults or manuals."},
+    'media_expander': {'gr': "📸 Κάμερα & 🎙️ Φωνητική Εντολή", 'en': "📸 Camera & 🎙️ Voice Input"},
+    'camera_label': {'gr': "📸 Τράβηξε Φωτογραφία", 'en': "📸 Take Photo"},
+    'audio_label': {'gr': "🎙️ Ηχογράφηση / Αρχείο Ήχου", 'en': "🎙️ Voice Message / Audio File"},
+    'media_sent': {'gr': "✅ Τα αρχεία επισυνάφθηκαν!", 'en': "✅ Files attached!"},
+    'brand_label': {'gr': "Επιλογή Μάρκας", 'en': "Select Brand"},
+    'model_label': {'gr': "Μοντέλο", 'en': "Model"},
+    'manual_retrieval_error': {'gr': "Σφάλμα ανάκτησης manual: {error}", 'en': "Manual retrieval error: {error}"},
+    'manuals_found': {'gr': "Βρέθηκαν {count} σχετικά manuals.", 'en': "{count} relevant manuals found."},
+    'no_manuals': {'gr': "Δεν βρέθηκαν manuals για τη μάρκα/μοντέλο.", 'en': "No manuals found for brand/model."},
+    'select_brand_for_search': {'gr': "Επιλέξτε μάρκα για αναζήτηση.", 'en': "Select a brand to search."},
+    'chat_input_placeholder': {'gr': "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", 'en': "Describe the issue or error code..."},
+    'voice_input_help': {'gr': "Χρησιμοποιήστε μικρόφωνο για φωνητική εντολή.", 'en': "Use microphone for voice input."},
+    'voice_input_activated': {'gr': "Αναμονή για φωνητική εντολή...", 'en': "Waiting for voice input..."},
+    'upload_manual_label': {'gr': "Ανεβάστε PDF/Εικόνες", 'en': "Upload PDF/Images"},
+    'upload_manual_help': {'gr': "Ανεβάστε αρχεία για ανάλυση από το AI.", 'en': "Upload files for AI analysis."},
+    'processing_uploaded_file': {'gr': "Επεξεργασία ανεβασμένου αρχείου: '{name}'", 'en': "Processing uploaded file: '{name}'"},
+    'studying_sources': {'gr': "Μελετώ {count} πηγές...", 'en': "Studying {count} sources..."},
+    'download_error': {'gr': "Σφάλμα κατά το κατέβασμα '{filename}': {error}", 'en': "Error downloading '{filename}': {error}"},
+    'analyzing': {'gr': "Αναλύω...", 'en': "Analyzing..."},
+    'ai_engine_error': {'gr': "Σφάλμα AI Engine: {error}", 'en': "AI Engine Error: {error}"},
+    'tab_text': {'gr': "Κείμενο", 'en': "Text"},
+    'tab_voice': {'gr': "Φωνή", 'en': "Voice"},
+    'tab_upload': {'gr': "Upload", 'en': "Upload"},
 
-    def get_prioritized_manuals(self, brand, model_keyword, user_query):
-        """
-        ΤΟ ΜΥΣΤΙΚΟ ΟΠΛΟ:
-        1. Βρίσκει τα αρχεία της μάρκας.
-        2. Καταλαβαίνει τι ρωτάει ο χρήστης (Intent).
-        3. Αλλάζει τη σειρά των αρχείων δυναμικά.
-        """
-        data = st.session_state.get('library_cache', [])
-        results = []
-        target_brand = brand.upper()
-        target_model = model_keyword.upper() if model_keyword else None
+    # --- TOOLS (BTU) ---
+    'tool_btu_tab': {'gr': "❄️ BTU Calculator", 'en': "❄️ BTU Calculator"},
+    'tool_conv_tab': {'gr': "📏 Μετατροπέας", 'en': "📏 Converter"},
+    'tool_pipe_tab': {'gr': "🔥 Σωληνώσεις", 'en': "🔥 Piping Guide"},
+    'tool_area': {'gr': "Τετραγωνικά (m²)", 'en': "Area (m²)"},
+    'tool_height': {'gr': "Ύψος Χώρου (m)", 'en': "Ceiling Height (m)"},
+    'tool_insulation': {'gr': "Μόνωση", 'en': "Insulation"},
+    'tool_sun': {'gr': "Προσανατολισμός", 'en': "Sun Exposure"},
+    'tool_calc_res': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Capacity"},
+    'tool_rec': {'gr': "Προτεινόμενο", 'en': "Recommended"},
+    'ins_good': {'gr': "Καλή (Νέα Κουφώματα)", 'en': "Good (New Frames)"},
+    'ins_avg': {'gr': "Μέτρια (Διπλά Τζάμια 10ετ.)", 'en': "Average (Double Glazed)"},
+    'ins_bad': {'gr': "Κακή (Μονά/Αμόνωτο)", 'en': "Poor (Single Glazed)"},
+    'sun_low': {'gr': "Σκιερό / Βόρειο", 'en': "Shady / North"},
+    'sun_med': {'gr': "Μέτρια Ηλιοφάνεια", 'en': "Medium Sun"},
+    'sun_high': {'gr': "Πολύ Ήλιος / Ρετιρέ", 'en': "High Sun / Roof"},
+    'pipe_liquid': {'gr': "Υγρού (Liquid)", 'en': "Liquid Line"},
+    'pipe_gas': {'gr': "Αερίου (Gas)", 'en': "Gas Line"},
 
-        # 1. Βασικό Φιλτράρισμα (χρησιμοποιώντας τα μεταδεδομένα)
-        for item in data:
-            if item.get('brand', '').upper() == target_brand:
-                if target_model and item.get('model', '').upper() == target_model:
-                    results.append(item)
-                elif not target_model:
-                    results.append(item)
+    # --- ORGANIZER ---
+    'org_title': {'gr': "📅 AI Organizer", 'en': "📅 AI Organizer"},
+    'org_desc': {'gr': "🤖 **AI Auto-Sorter**<br>Σαρώνει και ταξινομεί αρχεία.", 'en': "🤖 **AI Auto-Sorter**<br>Scans and sorts files automatically."},
+    'org_start': {'gr': "Έναρξη Ταξινόμησης", 'en': "Start Sorting"},
+    'org_log': {'gr': "📜 Καταγραφή (Live Log)", 'en': "📜 Live Log"},
 
-        # 2. Ανίχνευση Πρόθεσης (Intent)
-        query = user_query.upper()
-        intent = "GENERAL"
+    # --- CLIENTS ---
+    'client_search': {'gr': "🔍 Αναζήτηση Πελάτη...", 'en': "🔍 Search Client..."},
+    'client_found': {'gr': "Βρέθηκαν", 'en': "Found"},
+    'client_empty': {'gr': "Η λίστα είναι κενή.", 'en': "Client list is empty."},
 
-        if any(x in query for x in ["ERROR", "ΒΛΑΒΗ", "ΣΦΑΛΜΑ", "FAULT", "CODE", "ΚΩΔΙΚΟΣ", "FIX", "PROBLEM"]):
-            intent = "ERROR"
-        elif any(x in query for x in ["INSTALL", "ΕΓΚΑΤΑΣΤΑΣΗ", "ΣΥΝΔΕΣΗ", "PIPE", "WIRING", "ΔΙΑΣΤΑΣΕΙΣ"]):
-            intent = "INSTALL"
-        elif any(x in query for x in ["USER", "ΧΡΗΣΗ", "ΟΔΗΓΙΕΣ", "RESET", "ΚΟΥΜΠΙ", "MODE", "ECO"]):
-            intent = "USER"
-        elif any(x in query for x in ["PART", "ΑΝΤΑΛΛΑΚΤΙΚ", "SPARE", "VALVE", "PCB", "SENSOR", "ΑΙΣΘΗΤΗΡ", "ΤΙΜΗ"]):
-            intent = "PARTS"
+    # --- DIAGNOSTICS (NEW) ---
+    'diag_title': {'gr': "🔧 Active Diagnostics / Διαδραστικός Οδηγός", 'en': "🔧 Active Diagnostics / Interactive Wizard"},
+    'diag_subtitle': {'gr': "Οδηγός Επίλυσης Βλαβών βήμα-προς-βήμα με AI", 'en': "Step-by-Step AI Troubleshooting Wizard"},
+    'diag_step': {'gr': "Βήμα", 'en': "Step"},
+    'diag_action': {'gr': "Ενέργεια:", 'en': "Action:"},
+    'diag_question': {'gr': "❓ Ερώτηση:", 'en': "❓ Question:"},
+    'diag_yes': {'gr': "✅ ΝΑΙ / Λύθηκε", 'en': "✅ YES / Solved"},
+    'diag_solved_msg': {'gr': "Το πρόβλημα επιλύθηκε!", 'en': "Problem solved!"},
+    'diag_no': {'gr': "❌ ΟΧΙ / Συνέχεια", 'en': "❌ NO / Continue"},
+    'diag_cancel': {'gr': "⚠️ Ακύρωση", 'en': "⚠️ Cancel"},
+    'help_title': {'gr': "Βοήθεια", 'en': "Help"},
+}
 
-        # 3. Δυναμική Βαθμολόγηση (Scoring)
-        results.sort(key=lambda item: self._calculate_score(item, intent), reverse=True)
-
-        return results
-
-    def _calculate_score(self, item, intent):
-        """Δίνει πόντους στο αρχείο ανάλογα με το αν ταιριάζει στην ερώτηση."""
-        meta_type = item.get('meta_type', '').upper()
-        score = 0
-
-        # --- SCORING RULES ---
-        if intent == "PARTS":
-            if "SPARE" in meta_type: score += 100
-            elif "SERVICE" in meta_type: score += 50
-            else: score += 10
-
-        elif intent == "ERROR":
-            if "SERVICE" in meta_type: score += 100
-            elif "INSTALLATION" in meta_type: score += 90
-            elif "USER" in meta_type: score += 40
-            elif "SPARE" in meta_type: score += 10
-
-        elif intent == "INSTALL":
-            if "INSTALLATION" in meta_type: score += 100
-            elif "TECHNICAL" in meta_type: score += 80
-            elif "SERVICE" in meta_type: score += 60
-
-        elif intent == "USER":
-            if "USER" in meta_type: score += 100
-            elif "INSTALLATION" in meta_type: score += 50
-
-        else: # GENERAL (Default)
-            if "SERVICE" in meta_type: score += 90
-            elif "INSTALLATION" in meta_type: score += 80
-            elif "USER" in meta_type: score += 70
-            elif "SPARE" in meta_type: score += 20
-
-        return score
-
-    def handle_manual_upload(self, uploaded_file, brand, model):
-        root_id = ConfigLoader.get_drive_folder_id()
-        if not root_id: return False
-        safe_name = f"User_Uploads | {brand} | {model} | {uploaded_file.name}"
-        file_id = self.drive.upload_stream(uploaded_file, safe_name, root_id)
-        if file_id:
-            new_entry = {'file_id': file_id, 'name': safe_name, 'link': f"https://drive.google.com/file/d/{file_id}/view", 'mime': 'application/pdf'}
-            st.session_state.library_cache.append(new_entry)
-            return True
-        return False
-
-    def get_manual_content_from_id(self, file_id: str) -> Optional[str]:
-        """Κατεβάζει ένα manual από το Drive και εξάγει το κείμενό του."""
-        try:
-            stream = self.drive.download_file_content(file_id)
-            if not stream:
-                logger.error(f"Failed to download content for file_id: {file_id}")
-                return None
-
-            reader = PdfReader(io.BytesIO(stream.getvalue()))
-            text = ""
-            for i in range(min(5, len(reader.pages))):
-                page_text = reader.pages[i].extract_text()
-                if page_text:
-                    text += page_text + "\n"
-
-            logger.info(f"Extracted {len(text)} characters from manual ID: {file_id}")
-            return text
-        except Exception as e:
-            logger.error(f"Error extracting text from manual ID: {file_id}. Error: {e}", exc_info=True)
-            return None
-
-    def smart_solve(self, user_query: str, uploaded_pdfs: List[Any], uploaded_imgs: List[Any], history: List[Dict], lang: str = "gr", manual_file_content: Optional[str] = None) -> str:
-        """
-        Λογική επίλυσης προβλημάτων που χρησιμοποιεί AI και επισυναπτόμενα αρχεία.
-        Προετοιμάζει τα content parts για το AI Engine.
-        """
-        if not self.ai_engine.model:
-            logger.error(f"AI System Error: AI Engine not initialized in ChatSessionService. Last error: {self.ai_engine.last_error or 'Unknown'}")
-            return f"❌ **AI System Error:** AI Engine not initialized. {self.ai_engine.last_error or ''}"
-
-        # 1. Προετοιμασία Content Parts (History)
-        content_parts = []
-        for msg in history[-10:]:
-            content_parts.append({"text": f"Προηγούμενος Χρήστης: {msg['content']}"})
-
-        # 2. Προσθήκη PDF αρχείων (από το βασικό chat input)
-        for pdf_file in uploaded_pdfs:
-            pdf_bytes = pdf_file.getvalue()
-            content_parts.append({"mime_type": "application/pdf", "data": pdf_bytes})
-            content_parts.append({"text": f"Αρχείο PDF: {pdf_file.name}"})
-
-        # 3. Προσθήκη εικόνων (από το βασικό chat input)
-        for img_file in uploaded_imgs:
-            img_bytes = img_file.getvalue()
-            content_parts.append({"mime_type": img_file.type, "data": img_bytes})
-            content_parts.append({"text": f"Εικόνα: {img_file.name}"})
-
-        # 4. Προσθήκη της τρέχουσας ερώτησης του χρήστη
-        content_parts.append({"text": f"Τρέχουσα Ερώτηση Χρήστη: {user_query}"})
-
-        # 5. Κλήση του AI Engine
-        # Διορθώθηκε η κλήση για να χρησιμοποιεί το `manual_file_content` που περνάει από το UI
-        response = self.ai_engine.get_chat_response(content_parts=content_parts, lang=lang, manual_file_content=manual_file_content)
-        return response
+def get_text(key: str, lang: str = 'gr') -> str:
+    """Retrieves text from the language pack based on key and language."""
+    return TRANS.get(key, {}).get(lang, f"[{key}]")
