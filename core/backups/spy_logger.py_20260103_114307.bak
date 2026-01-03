@@ -18,7 +18,7 @@ class StreamlitSpyHandler(logging.Handler):
     """Ένας ειδικός 'πράκτορας' που κλέβει τα logs και τα βάζει στο Session State."""
     
     def emit(self, record):
-        try: # Rule 4: Error Handling
+        try:
             timestamp = datetime.datetime.now().strftime("%H:%M:%S")
             msg = self.format(record)
             
@@ -44,21 +44,17 @@ class StreamlitSpyHandler(logging.Handler):
             if len(st.session_state.spy_logs) > 100:
                 st.session_state.spy_logs.pop()
             
-        except Exception as e:
-            # Handle errors in the handler itself to prevent app crash
-            print(f"ERROR in SpyLogger Handler: {e}")
-            self.handleError(record) # Call default error handler
+        except Exception:
+            self.handleError(record)
 
 def setup_spy():
     """Ενεργοποιεί τον κατάσκοπο στο ξεκίνημα."""
-    # Rule 6: Έλεγχος initialization keys.
     if "spy_active" not in st.session_state:
         # Ρύθμιση του βασικού Logger
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.INFO)
         
         # Καθαρισμός παλιών handlers για να μην έχουμε διπλά μηνύματα
-        # ΔΙΟΡΘΩΣΗ: Προστέθηκε το 'if not isinstance(h, StreamlitSpyHandler)'
         root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, StreamlitSpyHandler)]
         
         # Προσθήκη του δικού μας Handler
@@ -70,9 +66,7 @@ def setup_spy():
         st.session_state.spy_active = True
         
         # REMOVED: Δεν φορτώνουμε πλέον logs από SQLite
-        # Rule 6: Ensure spy_logs is initialized
-        if 'spy_logs' not in st.session_state:
-            st.session_state.spy_logs = [] 
+        st.session_state.spy_logs = [] # Ensure it's initialized
         st.session_state.spy_logs.insert(0, "`System` 🕵️ Ο Κατάσκοπος είναι Οnline (τα logs τώρα αποθηκεύονται στο Drive).")
 
 def sync_current_spy_logs_to_drive() -> Optional[str]: # NEW
@@ -80,14 +74,9 @@ def sync_current_spy_logs_to_drive() -> Optional[str]: # NEW
     Συγχρονίζει τα τρέχοντα logs του Spy Logger στο Google Drive.
     Επιστρέφει το link του αρχείου στο Drive.
     """
-    # Rule 6: Έλεγχος initialization keys.
     if "spy_logs" in st.session_state and st.session_state.spy_logs:
-        try: # Rule 4: Error Handling
-            # Κάνουμε μια shallow copy της λίστα για να αποφύγουμε προβλήματα αν αλλάξει κατά τη μεταφόρτωση
-            log_link = DatabaseConnector.upload_spy_logs_to_drive(list(st.session_state.spy_logs)) 
-            return log_link
-        except Exception as e:
-            logger.error(f"Error syncing spy logs to Drive: {e}", exc_info=True) # Rule 4
-            return None
-    logger.info("No spy logs found in session state to upload.") # Rule 4
+        # Κάνουμε μια shallow copy της λίστα για να αποφύγουμε προβλήματα αν αλλάξει κατά τη μεταφόρτωση
+        log_link = DatabaseConnector.upload_spy_logs_to_drive(list(st.session_state.spy_logs)) 
+        return log_link
+    logger.info("No spy logs found in session state to upload.")
     return None

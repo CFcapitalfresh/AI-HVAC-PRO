@@ -38,13 +38,19 @@ def init_session():
 
     # Αρχικοποίηση της τοπικής βάσης δεδομένων (SQLite) αν δεν έχει γίνει ήδη
     if 'db_initialized' not in st.session_state:
-        if DatabaseConnector.init_local_db():
-            st.session_state.db_initialized = True
-            logger.info(get_text('db_init_success', st.session_state.lang))
-        else:
+        try: # Κανόνας 4: Error Handling
+            if DatabaseConnector.init_local_db():
+                st.session_state.db_initialized = True
+                logger.info(get_text('db_init_success', st.session_state.lang))
+            else:
+                st.session_state.db_initialized = False
+                logger.error(get_text('db_init_fail', st.session_state.lang))
+                st.error(get_text('db_init_fail', st.session_state.lang))
+        except Exception as e:
             st.session_state.db_initialized = False
-            logger.error(get_text('db_init_fail', st.session_state.lang))
-            st.error(get_text('db_init_fail', st.session_state.lang))
+            logger.critical(f"Critical error during DB initialization: {e}", exc_info=True)
+            st.error(f"{get_text('db_init_fail', st.session_state.lang)}: {e}")
+
 
     # Ρύθμιση του Spy Logger
     setup_spy()
@@ -125,89 +131,96 @@ def main():
                 submitted = st.form_submit_button(get_text('btn_register', lang))
 
                 if submitted:
-                    # COMPLETE: Implement user registration logic
-                    success = AuthManager.register_new_user(reg_email, reg_name, reg_password)
-                    if success:
-                        st.success(get_text('reg_success', lang))
-                        logger.info(f"New user '{reg_email}' registered successfully (pending approval).")
-                    else:
-                        st.error(get_text('reg_fail', lang))
-                        logger.warning(f"Registration failed for '{reg_email}'.")
-        return # Important to return after login/register
+                    # Κανόνας 4: Error Handling
+                    try:
+                        if AuthManager.register_new_user(reg_email, reg_name, reg_password):
+                            st.success(get_text('reg_success', lang))
+                            logger.info(f"New user '{reg_email}' registered successfully (pending approval).")
+                            # Optionally, redirect to login tab or show a message.
+                        else:
+                            st.error(get_text('reg_fail', lang))
+                            logger.warning(f"Registration failed for '{reg_email}'.")
+                    except Exception as e:
+                        st.error(f"{get_text('reg_fail', lang)}: {e}")
+                        logger.error(f"Error during registration for '{reg_email}': {e}", exc_info=True)
+        return # Σταματάμε εδώ αν δεν έχει γίνει σύνδεση
+
+    # --- ΚΥΡΙΩΣ ΕΦΑΡΜΟΓΗ (ΜΕΤΑ ΤΗ ΣΥΝΔΕΣΗ) ---
+    user = st.session_state.user_info
+
+    # Sidebar Navigation
+    st.sidebar.image("assets/logo.png", use_column_width=True, caption=get_text('app_title', lang))
+    st.sidebar.markdown(f"**{get_text('dash_welcome', lang)}, {user['name']}!**")
+    st.sidebar.markdown(f"*{user['role'].upper()}*")
+    st.sidebar.divider()
     
-    # --- ΚΥΡΙΩΣ ΕΦΑΡΜΟΓΗ ---
-    # Sidebar Navigation (μόνο αφού ο χρήστης έχει συνδεθεί)
-    with st.sidebar:
-        st.image("assets/nek_logo.png", use_column_width=True, class_name="logo-img") # Ensure logo is in 'assets' folder
-        st.subheader(get_text('menu_header', lang))
+    st.sidebar.header(get_text('menu_header', lang))
+    
+    # Menus based on user role
+    menu_options = [
+        get_text('menu_dashboard', lang),
+        get_text('menu_chat', lang),
+        get_text('menu_library', lang),
+        get_text('menu_diagnostics', lang), # NEW
+        get_text('menu_clients', lang),
+        get_text('menu_organizer', lang),
+        get_text('menu_tools', lang),
+        get_text('menu_licensing', lang), # NEW
+        get_text('menu_help_user', lang), # NEW
+        get_text('menu_tech_specs', lang), # NEW
+    ]
+    
+    if user['role'] == 'admin':
+        menu_options.append(get_text('menu_admin', lang))
 
-        menu_items = {
-            "Dashboard": ui_dashboard,
-            "Diagnostics": ui_diagnostics,
-            "AI Chat": ui_chat,
-            "Manuals Library": ui_search,
-            "Client CRM": ui_clients,
-            "AI Organizer": ui_organizer,
-            "Tools": ui_tools,
-            "Admin Panel": ui_admin_panel,
-            "Tech Specs": ui_tech_specs,
-            "Licensing": ui_licensing,
-            "Help": ui_help_user
-        }
+    # Sidebar selection for page navigation
+    # Rule 6: Ensure 'page' is initialized and keys are unique for `selectbox`
+    current_page_index = menu_options.index(st.session_state.page) if st.session_state.page in menu_options else 0
+    selected_page = st.sidebar.selectbox(" ", menu_options, index=current_page_index, key="main_menu_selector", label_visibility="collapsed")
+
+    if selected_page:
+        st.session_state.page = selected_page
         
-        # Mapping menu keys to their translated texts
-        translated_menu_items = {get_text(f"menu_{k.lower().replace(' ', '_')}", lang): k for k in menu_items.keys()}
+    st.sidebar.divider()
 
-        # Display selected page from session state or default to Dashboard
-        current_page_key = st.session_state.page
-        if current_page_key not in menu_items:
-            current_page_key = "Dashboard" # Fallback if page key is invalid
+    if st.sidebar.button(get_text('logout', lang), use_container_width=True):
+        sync_current_spy_logs_to_drive() # Συγχρονισμός logs πριν την αποσύνδεση
+        st.session_state.user_info = None
+        st.session_state.messages = []
+        st.session_state.page = "Dashboard" # Επαναφορά στην αρχική σελίδα μετά την αποσύνδεση
+        # Clear other specific session state variables if needed for security/fresh start
+        for key in ['library_cache', 'chat_session_service', 'diagnostics_service_instance', 'sorter_stop_flag', 'sorter_running', 'sorter_failed_files', 'sorter_manual_review_files', 'sorter_irrelevant_files', 'sorter_duplicate_files', 'sorter_progress_data', 'sorter_run_log', 'sorter_summary', 'org_browse_level', 'org_current_folder_id', 'org_folder_history', 'admin_users_data', 'force_full_resort', 'library_search_input_text']:
+            if key in st.session_state:
+                del st.session_state[key]
+        logger.info(f"User {user['email']} logged out.")
+        st.rerun()
 
-        # Selectbox for navigation
-        selected_menu_translated = st.selectbox(
-            get_text('menu_header', lang),
-            options=list(translated_menu_items.keys()),
-            index=list(translated_menu_items.keys()).index(get_text(f"menu_{current_page_key.lower().replace(' ', '_')}", lang)),
-            key="main_menu_selector"
-        )
-        
-        # Update session state with the actual English key
-        selected_page_english_key = translated_menu_items[selected_menu_translated]
-        if st.session_state.page != selected_page_english_key:
-            st.session_state.page = selected_page_english_key
-            st.rerun() # Rerun to switch page
-
-        # Language Selector for main app (moved from login section)
-        st.divider()
-        st.markdown(f"**🌐 {get_text('lang_selector_title', lang)}**")
-        selected_lang = st.selectbox(
-            "",
-            options=["Ελληνικά", "English"],
-            index=0 if st.session_state.lang == 'gr' else 1,
-            key="app_lang_selector_sidebar"
-        )
-        new_lang = 'gr' if selected_lang == "Ελληνικά" else 'en'
-        if new_lang != st.session_state.lang:
-            st.session_state.lang = new_lang
-            logger.info(f"Language changed to: {new_lang}")
-            st.rerun()
-
-        # Logout button
-        if st.button(get_text('logout', lang)):
-            user_email = st.session_state.user_info['email'] if st.session_state.user_info else "N/A"
-            logger.info(f"User {user_email} logged out.")
-            st.session_state.user_info = None
-            st.session_state.messages = [] # Clear chat history on logout
-            st.session_state.page = "Dashboard" # Reset page
-            sync_current_spy_logs_to_drive() # Upload logs on logout
-            st.rerun()
-            
-        st.caption(f"App Version: {VERSION}")
-
-    # Render the selected page
-    try:
-        current_page_module = menu_items[st.session_state.page]
-        current_page_module.render(st.session_state.user_info)
+    # Render selected page
+    try: # Κανόνας 4: Error Handling
+        if st.session_state.page == get_text('menu_dashboard', lang):
+            ui_dashboard.render(user)
+        elif st.session_state.page == get_text('menu_chat', lang):
+            ui_chat.render(user)
+        elif st.session_state.page == get_text('menu_library', lang):
+            ui_search.render(user)
+        elif st.session_state.page == get_text('menu_diagnostics', lang): # NEW
+            ui_diagnostics.render(user)
+        elif st.session_state.page == get_text('menu_clients', lang):
+            ui_clients.render(user)
+        elif st.session_state.page == get_text('menu_organizer', lang):
+            ui_organizer.render(user)
+        elif st.session_state.page == get_text('menu_tools', lang):
+            ui_tools.render(user)
+        elif st.session_state.page == get_text('menu_admin', lang):
+            ui_admin_panel.render(user)
+        elif st.session_state.page == get_text('menu_licensing', lang): # NEW
+            ui_licensing.render(user)
+        elif st.session_state.page == get_text('menu_tech_specs', lang): # NEW
+            ui_tech_specs.render(user)
+        elif st.session_state.page == get_text('menu_help_user', lang): # NEW
+            ui_help_user.render(user)
+        else: # Fallback
+            ui_dashboard.render(user)
     except Exception as e:
         logger.error(f"Error rendering page '{st.session_state.page}': {e}", exc_info=True)
         st.error(f"{get_text('general_ui_error', lang).format(error=e)}")

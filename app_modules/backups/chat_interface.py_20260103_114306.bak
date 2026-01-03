@@ -4,14 +4,12 @@ VERSION: 2.0.0 (TITANIUM)
 DESCRIPTION: Διαχειρίζεται το UI της συνομιλίας, τα Uploads και την αλληλεπίδραση με το AI.
              **Αυτό το module φαίνεται να είναι πλέον ΑΝΕΝΕΡΓΟ/REDUNDANT, καθώς το `main.py`
              χρησιμοποιεί `modules/ui_chat.py` για την κύρια λειτουργία συνομιλίας.**
-             Εάν υπάρχουν μοναδικές λειτουργίες εδώ, θα πρέπει να μεταφερθούν στο `modules/ui_chat.py`
-             ή να διαγραφεί για καθαρότερη αρχιτεκτονική.
+             Εάν υπάρχουν μοναδικές λειτουργίες εδώ, θα πρέπει να μεταφερθούν στο `modules/ui_chat.py`.
 """
 
 import streamlit as st
 import logging
 from typing import List, Dict, Any, Optional
-from core.language_pack import get_text # Rule 5
 
 # Ρύθμιση Logger για το Module
 logger = logging.getLogger("Module_Chat")
@@ -25,16 +23,14 @@ def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) 
         auth_module: Το φορτωμένο module auth.py (για logs)
         user_email: Το email του χρήστη για καταγραφή
     """
-    lang = st.session_state.get('lang', 'gr') # Rule 6, 5
+    st.header("⚡ Mastro Nek AI Assistant")
     
-    st.header("⚡ Mastro Nek AI Assistant") # No direct translation here, but should be handled by get_text in ui_chat
-
     # 1. Εμφάνιση Ιστορικού Μηνυμάτων
     # Χρησιμοποιούμε αμυντικό προγραμματισμό για να μην σκάσει αν η λίστα είναι None
     messages = st.session_state.get("messages", [])
     
     if not messages:
-        st.info(get_text('chat_intro', lang) if 'chat_intro' in LANGUAGE_PACK else "👋 Γεια σου! Είμαι ο Mastro Nek AI. Ρώτησέ με για βλάβες, manuals ή ανταλλακτικά.")
+        st.info("👋 Γεια σου! Είμαι ο Mastro Nek AI. Ρώτησέ με για βλάβες, manuals ή ανταλλακτικά.")
     
     for msg in messages:
         with st.chat_message(msg["role"]):
@@ -42,16 +38,16 @@ def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) 
 
     # 2. Περιοχή Εισαγωγής (Input Area)
     # Το CSS στο main.py θα φροντίσει να είναι 'Sticky' στο κάτω μέρος
-    user_prompt = st.chat_input(get_text('chat_input_placeholder', lang)) # Rule 5
+    user_prompt = st.chat_input("Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...")
 
     # 3. Sidebar Uploads (Mobile First Approach)
     # Τα uploads μπαίνουν στο sidebar για να μην πιάνουν χώρο στο chat
-    with st.sidebar.expander(get_text('media_expander', lang) if 'media_expander' in LANGUAGE_PACK else "📎 Επισύναψη Αρχείων", expanded=False):
-        uploaded_pdfs = st.file_uploader(get_text('upload_manual_label', lang) if 'upload_manual_label' in LANGUAGE_PACK else "Ανεβάστε PDF (Manuals)", type=["pdf"], accept_multiple_files=True, key="chat_pdf_uploader") # Rule 2, 5
-        uploaded_imgs = st.file_uploader(get_text('upload_image_label', lang) if 'upload_image_label' in LANGUAGE_PACK else "Ανεβάστε Φωτογραφίες", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="chat_img_uploader") # Rule 2, 5
+    with st.sidebar.expander("📎 Επισύναψη Αρχείων", expanded=False):
+        uploaded_pdfs = st.file_uploader("Ανεβάστε PDF (Manuals)", type=["pdf"], accept_multiple_files=True, key="chat_pdf_uploader")
+        uploaded_imgs = st.file_uploader("Ανεβάστε Φωτογραφίες", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="chat_img_uploader")
         
         if uploaded_pdfs or uploaded_imgs:
-            st.success(f"{get_text('media_sent', lang).format(count=len(uploaded_pdfs or []) + len(uploaded_imgs or []))}" if 'media_sent' in LANGUAGE_PACK else f"Έτοιμα για αποστολή: {len(uploaded_pdfs or []) + len(uploaded_imgs or [])} αρχεία")
+            st.success(f"Έτοιμα για αποστολή: {len(uploaded_pdfs or []) + len(uploaded_imgs or [])} αρχεία")
 
     # 4. Λογική Επεξεργασίας Μηνύματος
     if user_prompt:
@@ -60,18 +56,18 @@ def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) 
         with st.chat_message("user"):
             st.markdown(user_prompt)
             if uploaded_pdfs:
-                st.markdown(f"*📎 {get_text('pdf_attached', lang).format(count=len(uploaded_pdfs))}*") # Rule 5
+                st.markdown(f"*📎 Επισυνάφθηκαν {len(uploaded_pdfs)} PDF αρχεία*")
             if uploaded_imgs:
-                st.markdown(f"*📸 {get_text('image_attached', lang).format(count=len(uploaded_imgs))}*") # Rule 5
+                st.markdown(f"*📸 Επισυνάφθηκαν {len(uploaded_imgs)} Εικόνες*")
 
         # B. Επεξεργασία από το AI
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
             
-            try: # Rule 4: Error Handling
-                with st.spinner(get_text('analyzing', lang)): # Rule 5
-                    if brain_module: # Rule 3
+            try:
+                with st.spinner("🔄 Ανάλυση δεδομένων και εγχειριδίων..."):
+                    if brain_module:
                         # Κλήση της συνάρτησης smart_solve του brain.py
                         # Περνάμε το ιστορικό για context
                         full_response = brain_module.smart_solve(
@@ -81,7 +77,7 @@ def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) 
                             history=st.session_state.messages[:-1]
                         )
                     else:
-                        full_response = f"❌ **{get_text('ai_engine_error', lang)}:** {get_text('brain_module_missing', lang)}" # Rule 5
+                        full_response = "❌ **System Error:** Το Brain Module δεν είναι διαθέσιμο."
                         logger.critical("Brain module is missing during chat execution.")
 
                 # C. Εμφάνιση απάντησης
@@ -91,11 +87,11 @@ def render_chat_interface(brain_module: Any, auth_module: Any, user_email: str) 
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
 
                 # E. Καταγραφή στο Audit Log (αν υπάρχει το auth module)
-                if auth_module: # Rule 3
+                if auth_module:
                     auth_module.log_interaction(user_email, "Chat Query", user_prompt[:100])
 
             except Exception as e:
-                error_msg = f"⚠️ **{get_text('ai_engine_error', lang)}:** {str(e)}" # Rule 5
+                error_msg = f"⚠️ **AI Execution Error:** {str(e)}"
                 response_placeholder.error(error_msg)
-                logger.error(f"Chat Error: {e}", exc_info=True) # Rule 4
+                logger.error(f"Chat Error: {e}")
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})

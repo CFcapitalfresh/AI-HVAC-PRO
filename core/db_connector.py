@@ -22,11 +22,12 @@ class DatabaseConnector:
     def _get_gsheets_conn():
         """Παρέχει τη σύνδεση για Google Sheets."""
         if DatabaseConnector._gsheets_conn is None:
-            try:
+            try: # Rule 4: Error Handling
                 DatabaseConnector._gsheets_conn = st.connection("gsheets", type=GSheetsConnection)
+                logger.info("GSheets connection established.")
             except Exception as e:
-                logger.error(f"Failed to establish GSheets connection: {e}")
-                st.error(f"Αποτυχία σύνδεσης με Google Sheets: {e}")
+                logger.error(f"Failed to establish GSheets connection: {e}", exc_info=True) # Rule 4
+                # st.error(f"Αποτυχία σύνδεσης με Google Sheets: {e}") # Do not show error directly in core, let UI handle it.
                 DatabaseConnector._gsheets_conn = False # Σημείωσε την αποτυχία
         return DatabaseConnector._gsheets_conn if DatabaseConnector._gsheets_conn else None
 
@@ -34,12 +35,12 @@ class DatabaseConnector:
     def _get_sqlite_conn():
         """Παρέχει τη σύνδεση για SQLite."""
         if DatabaseConnector._sqlite_conn is None:
-            try:
+            try: # Rule 4: Error Handling
                 DatabaseConnector._sqlite_conn = sqlite3.connect(DatabaseConnector._sqlite_db_path)
                 logger.info(f"SQLite connection established to {DatabaseConnector._sqlite_db_path}")
             except Exception as e:
-                logger.error(f"Failed to establish SQLite connection: {e}")
-                st.error(f"Αποτυχία σύνδεσης με SQLite: {e}")
+                logger.error(f"Failed to establish SQLite connection: {e}", exc_info=True) # Rule 4
+                # st.error(f"Αποτυχία σύνδεσης με SQLite: {e}") # Do not show error directly in core, let UI handle it.
                 DatabaseConnector._sqlite_conn = False # Σημείωσε την αποτυχία
         return DatabaseConnector._sqlite_conn if DatabaseConnector._sqlite_conn else None
     
@@ -58,7 +59,7 @@ class DatabaseConnector:
         if DatabaseConnector._get_sqlite_conn():
             conn = DatabaseConnector._get_sqlite_conn()
             cursor = conn.cursor()
-            try:
+            try: # Rule 4: Error Handling
                 # Δημιουργία πίνακα Users (αν δεν υπάρχει) - ΜΟΝΟ ΓΙΑ OFFLINE / LOCAL
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS Users (
@@ -89,12 +90,14 @@ class DatabaseConnector:
                         description TEXT
                     )
                 """)
-                # REMOVED: Δημιουργία πίνακα SpyLogs (έχει μεταφερθεί στο Google Drive)
                 conn.commit()
                 logger.info("Local SQLite database initialized successfully with Users, Clients, and Logs tables.")
                 return True
-            except Exception as e:
-                logger.error(f"Failed to initialize SQLite tables: {e}")
+            except sqlite3.Error as e: # Rule 4: Specific DB error handling
+                logger.error(f"SQLite error during table initialization: {e}", exc_info=True)
+                return False
+            except Exception as e: # Rule 4: General error handling
+                logger.error(f"Failed to initialize SQLite tables: {e}", exc_info=True)
                 return False
         return False
 
@@ -112,172 +115,168 @@ class DatabaseConnector:
         if use_local_db:
             conn = DatabaseConnector._get_sqlite_conn()
             if not conn: return pd.DataFrame()
-            try:
-                # Προσοχή: Εδώ θα πρέπει να έχουμε προκαθορισμένους πίνακες
+            try: # Rule 4: Error Handling
                 df = pd.read_sql_query(f"SELECT * FROM {sheet_name}", conn)
                 return df
-            except pd.io.sql.DatabaseError as e:
-                logger.warning(f"SQLite table '{sheet_name}' not found or query error: {e}")
+            except pd.io.sql.DatabaseError as e: # Rule 4: Specific DB error
+                logger.error(f"SQLite query error for table '{sheet_name}': {e}", exc_info=True)
                 return pd.DataFrame()
-            except Exception as e:
-                logger.error(f"Error fetching from local SQLite DB '{sheet_name}': {e}")
+            except Exception as e: # Rule 4: General error
+                logger.error(f"Failed to fetch data from SQLite table '{sheet_name}': {e}", exc_info=True)
                 return pd.DataFrame()
-        else:
+        else: # Try GSheets
             conn = DatabaseConnector._get_gsheets_conn()
-            if not conn: return pd.DataFrame()
-            try:
-                # Cache data for ttl seconds to avoid excessive API calls
-                return conn.read(worksheet=sheet_name, ttl=ttl)
+            if not conn: return pd.DataFrame() # No connection, return empty
+            try: # Rule 4: Error Handling
+                # Caching in Streamlit's @st.cache_data for performance
+                @st.cache_data(ttl=ttl, show_spinner=False)
+                def _fetch_gsheets_data(sheet: str) -> pd.DataFrame:
+                    df = conn.read(worksheet=sheet, usecols=list(range(10)), ttl=ttl)
+                    df.columns = df.columns.str.lower() # Normalize column names
+                    return df
+                
+                df = _fetch_gsheets_data(sheet_name)
+                return df
             except Exception as e:
-                logger.error(f"Error fetching from Google Sheets '{sheet_name}': {e}")
-                st.error(f"Αδυναμία φόρτωσης δεδομένων από το φύλλο '{sheet_name}'.")
+                logger.error(f"Failed to fetch data from GSheets '{sheet_name}': {e}", exc_info=True) # Rule 4
                 return pd.DataFrame()
 
     @staticmethod
     def append_data(sheet_name: str, data: list, use_local_db: bool = False) -> bool:
         """
-        Προσθέτει μια νέα γραμμή δεδομένων στο τέλος ενός φύλλου/πίνακα.
+        Προσθέτει μια νέα γραμμή δεδομένων σε ένα φύλλο Google Sheets ή πίνακα SQLite.
         Args:
-            sheet_name (str): Το όνομα του φύλλου (για GSheets) ή του πίνακα (για SQLite).
-            data (list): Μια λίστα τιμών που θα προστεθούν.
-            use_local_db (bool): Αν είναι True, χρησιμοποιεί την SQLite βάση.
+            sheet_name (str): Το όνομα του φύλλου/πίνακα.
+            data (list): Η λίστα των τιμών για τη νέα γραμμή.
+            use_local_db (bool): Αν είναι True, προσθέτει στην SQLite βάση.
         Returns:
-            bool: True αν η προσθήκη ήταν επιτυχής, False διαφορετικά.
+            bool: True αν η προσθήκη ήταν επιτυχής, αλλιώς False.
         """
         if use_local_db:
             conn = DatabaseConnector._get_sqlite_conn()
             if not conn: return False
-            try:
-                # Για SQLite, χρειαζόμαστε τα ονόματα των στηλών.
-                # Αυτό είναι ένα απλοποιημένο παράδειγμα που υποθέτει τη σειρά.
-                # Σε πιο σύνθετα σενάρια, θα περνούσαμε ένα dict και θα κάναμε insert.
-                # Για "Users": created_at, email, name, password_hash, role
-                # Για "Logs": timestamp, user_email, action, description
-                if sheet_name == "Users" and len(data) == 5:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO Users (created_at, email, name, password_hash, role) VALUES (?, ?, ?, ?, ?)", data)
-                    conn.commit()
-                    logger.info(f"Data appended to local SQLite table '{sheet_name}'.")
-                    return True
-                elif sheet_name == "Logs" and len(data) == 4:
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO Logs (timestamp, user_email, action, description) VALUES (?, ?, ?, ?)", data)
-                    conn.commit()
-                    logger.info(f"Data appended to local SQLite table '{sheet_name}'.")
-                    return True
-                else:
-                    logger.error(f"Unsupported table '{sheet_name}' or data format for SQLite append.")
+            cursor = conn.cursor()
+            try: # Rule 4: Error Handling
+                # Fetch column names from the table
+                cursor.execute(f"PRAGMA table_info({sheet_name})")
+                cols_info = cursor.fetchall()
+                col_names = [info[1] for info in cols_info]
+                
+                if not col_names:
+                    logger.error(f"No columns found for SQLite table '{sheet_name}'. Cannot append data.")
                     return False
-            except Exception as e:
-                logger.error(f"Error appending to local SQLite DB '{sheet_name}': {e}")
+
+                # Generate placeholders for the SQL query
+                placeholders = ', '.join(['?' for _ in data])
+                query = f"INSERT INTO {sheet_name} ({', '.join(col_names[:len(data)])}) VALUES ({placeholders})"
+                
+                cursor.execute(query, data)
+                conn.commit()
+                logger.info(f"Appended data to SQLite table '{sheet_name}'.")
+                return True
+            except sqlite3.Error as e:
+                logger.error(f"SQLite error appending data to '{sheet_name}': {e}", exc_info=True)
                 return False
-        else:
+            except Exception as e:
+                logger.error(f"Failed to append data to SQLite table '{sheet_name}': {e}", exc_info=True)
+                return False
+        else: # Try GSheets
             conn = DatabaseConnector._get_gsheets_conn()
             if not conn: return False
-            try:
-                conn.append_dataframe(pd.DataFrame([data], columns=[]), worksheet=sheet_name)
-                # Clear Streamlit's cache for this sheet
-                if f"st_connection_gsheets__{sheet_name}" in st.session_state:
-                    del st.session_state[f"st_connection_gsheets__{sheet_name}"]
-                logger.info(f"Data appended to Google Sheets '{sheet_name}'.")
+            try: # Rule 4: Error Handling
+                conn.append_dataframe(pd.DataFrame([data]), worksheet=sheet_name)
+                logger.info(f"Appended data to GSheets '{sheet_name}'.")
+                # Invalidate cache for this sheet
+                st.cache_data.clear() # Clear all caches for simplicity for now, consider granular clear for performance.
                 return True
             except Exception as e:
-                logger.error(f"Error appending to Google Sheets '{sheet_name}': {e}")
-                st.error(f"Αδυναμία προσθήκης δεδομένων στο φύλλο '{sheet_name}'.")
+                logger.error(f"Failed to append data to GSheets '{sheet_name}': {e}", exc_info=True) # Rule 4
                 return False
 
     @staticmethod
     def update_all_data(sheet_name: str, df: pd.DataFrame, use_local_db: bool = False) -> bool:
         """
-        Αντικαθιστά όλα τα δεδομένα σε ένα φύλλο/πίνακα με ένα νέο DataFrame.
+        Ανανεώνει όλα τα δεδομένα σε ένα φύλλο Google Sheets ή πίνακα SQLite με ένα DataFrame.
         Args:
-            sheet_name (str): Το όνομα του φύλλου (για GSheets) ή του πίνακα (για SQLite).
+            sheet_name (str): Το όνομα του φύλλου/πίνακα.
             df (pd.DataFrame): Το DataFrame με τα νέα δεδομένα.
-            use_local_db (bool): Αν είναι True, χρησιμοποιεί την SQLite βάση.
+            use_local_db (bool): Αν είναι True, ενημερώνει την SQLite βάση.
         Returns:
-            bool: True αν η ενημέρωση ήταν επιτυχής, False διαφορετικά.
+            bool: True αν η ενημέρωση ήταν επιτυχής, αλλιώς False.
         """
         if use_local_db:
             conn = DatabaseConnector._get_sqlite_conn()
             if not conn: return False
-            try:
-                # Drop existing table and recreate from DataFrame
-                # This is a simple overwrite. For more complex updates, use SQL UPDATE/DELETE.
-                df.to_sql(sheet_name, conn, if_exists='replace', index=False)
+            cursor = conn.cursor()
+            try: # Rule 4: Error Handling
+                # Delete existing data and insert new. This is simpler for full DataFrame updates.
+                cursor.execute(f"DELETE FROM {sheet_name}")
+                
+                # Convert DataFrame to records for insertion
+                # Ensure column names match
+                cols = ", ".join(df.columns)
+                placeholders = ", ".join("?" * len(df.columns))
+                insert_query = f"INSERT INTO {sheet_name} ({cols}) VALUES ({placeholders})"
+
+                for _, row in df.iterrows():
+                    cursor.execute(insert_query, tuple(row))
+                
                 conn.commit()
-                logger.info(f"Local SQLite table '{sheet_name}' updated successfully.")
+                logger.info(f"Updated all data in SQLite table '{sheet_name}'.")
                 return True
-            except Exception as e:
-                logger.error(f"Error updating local SQLite DB '{sheet_name}': {e}")
+            except sqlite3.Error as e:
+                logger.error(f"SQLite error updating all data in '{sheet_name}': {e}", exc_info=True)
                 return False
-        else:
+            except Exception as e:
+                logger.error(f"Failed to update all data in SQLite table '{sheet_name}': {e}", exc_info=True)
+                return False
+        else: # Try GSheets
             conn = DatabaseConnector._get_gsheets_conn()
             if not conn: return False
-            try:
-                conn.update(dataframe=df, worksheet=sheet_name)
-                # Clear Streamlit's cache for this sheet
-                if f"st_connection_gsheets__{sheet_name}" in st.session_state:
-                    del st.session_state[f"st_connection_gsheets__{sheet_name}"]
-                logger.info(f"Google Sheets '{sheet_name}' updated successfully.")
+            try: # Rule 4: Error Handling
+                conn.clear(worksheet=sheet_name) # Clear existing data
+                conn.append_dataframe(df, worksheet=sheet_name) # Write new data
+                logger.info(f"Updated all data in GSheets '{sheet_name}'.")
+                # Invalidate cache for this sheet
+                st.cache_data.clear() # Clear all caches for simplicity for now, consider granular clear for performance.
                 return True
             except Exception as e:
-                logger.error(f"Error updating Google Sheets '{sheet_name}': {e}")
-                st.error(f"Αδυναμία ενημέρωσης δεδομένων στο φύλλο '{sheet_name}'.")
+                logger.error(f"Failed to update all data in GSheets '{sheet_name}': {e}", exc_info=True) # Rule 4
                 return False
 
     @staticmethod
-    def upload_spy_logs_to_drive(logs_list: list) -> Optional[str]:
+    def upload_spy_logs_to_drive(logs_list: list) -> Optional[str]: # Rule 7
         """
-        Δημιουργεί ή ενημερώνει ένα αρχείο logs στο Google Drive.
-        Αρχικοποιεί το DriveManager εδώ για να διασφαλίσει ότι χρησιμοποιείται σωστά
-        και για να διαχειριστεί το folder ID των logs.
+        Μεταφορτώνει τα τρέχοντα logs του Spy Logger στο Google Drive ως αρχείο κειμένου.
+        Δημιουργεί φάκελο 'SpyLogs' αν δεν υπάρχει.
         """
-        try:
-            drive_manager = DriveManager()
-            if not drive_manager.service:
-                logger.error("Drive service not available for Spy Logs upload.")
+        try: # Rule 4: Error Handling
+            drive_manager = DriveManager() # Rule 3
+            root_id = drive_manager.root_id # Rule 7
+
+            if not root_id:
+                logger.error("Drive root folder ID is missing. Cannot upload spy logs.")
                 return None
 
-            # Εξασφάλιση ότι υπάρχει ο φάκελος "Spy_Logs"
-            if DatabaseConnector._spy_logs_folder_id is None:
-                # Αναζήτηση του φάκελου "Spy_Logs" στον root του DriveManager
-                spy_logs_folder_name = "Spy_Logs"
-                
-                # Πρώτα προσπαθούμε να τον βρούμε
-                query = f"name = '{spy_logs_folder_name}' and '{drive_manager.root_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-                results = drive_manager.service.files().list(q=query, fields="files(id)").execute()
-                files = results.get('files', [])
-                
-                if files:
-                    DatabaseConnector._spy_logs_folder_id = files[0]['id']
-                    logger.info(f"Found existing 'Spy_Logs' folder. ID: {DatabaseConnector._spy_logs_folder_id}")
-                else:
-                    # Αν δεν υπάρχει, τον δημιουργούμε
-                    DatabaseConnector._spy_logs_folder_id = drive_manager.create_folder(spy_logs_folder_name, drive_manager.root_id)
-                    if DatabaseConnector._spy_logs_folder_id:
-                        logger.info(f"Created 'Spy_Logs' folder. ID: {DatabaseConnector._spy_logs_folder_id}")
-                    else:
-                        logger.error("Failed to create 'Spy_Logs' folder.")
-                        return None
-            
-            if not DatabaseConnector._spy_logs_folder_id:
-                logger.error("Spy Logs folder ID is still not set after creation/lookup.")
+            # Δημιουργία ή εύρεση του φακέλου "SpyLogs"
+            spy_logs_folder_id = drive_manager.create_folder("SpyLogs", root_id) # Rule 7
+            if not spy_logs_folder_id:
+                logger.error("Failed to create/find 'SpyLogs' folder in Drive. Cannot upload logs.")
                 return None
 
+            # Ετοιμασία του αρχείου log
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            log_filename = f"SpyLog_{timestamp}.md"
             log_content = "\n".join(logs_list)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            file_name = f"spy_log_{timestamp}.md" # Save as markdown for readability
 
-            # Ανέβασμα του αρχείου logs
-            uploaded_file_id = drive_manager.upload_text(log_content, file_name, DatabaseConnector._spy_logs_folder_id, mime_type='text/markdown')
-
-            if uploaded_file_id:
-                file_link = f"https://drive.google.com/file/d/{uploaded_file_id}/view?usp=drivesdk"
-                logger.info(f"Spy Logs uploaded to Drive: {file_link}")
-                return file_link
+            # Μεταφόρτωση στο Drive
+            file_id = drive_manager.upload_text_file(log_filename, log_content, spy_logs_folder_id) # Rule 7
+            if file_id:
+                logger.info(f"Spy logs uploaded to Drive: {log_filename}")
+                return drive_manager.get_file_link(file_id) # Rule 7
             else:
-                logger.error("Failed to upload Spy Logs to Drive.")
+                logger.error("Failed to upload spy logs to Drive.")
                 return None
         except Exception as e:
-            logger.error(f"CRITICAL ERROR uploading Spy Logs to Drive: {e}", exc_info=True)
+            logger.error(f"Error uploading spy logs to Drive: {e}", exc_info=True) # Rule 4
             return None

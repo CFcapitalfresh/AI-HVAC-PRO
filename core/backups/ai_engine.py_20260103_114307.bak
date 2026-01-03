@@ -21,39 +21,33 @@ class AIEngine:
         self._setup()
 
     def _setup(self):
-        """
-        Initializes the Gemini API and selects the best available model.
-        """
         if not self.api_key:
             self.last_error = "MISSING API KEY: GEMINI_KEY not found in secrets.toml or environment variables."
-            logger.error(self.last_error) # Rule 4
+            logger.error(self.last_error)
             return
 
-        try: # Rule 4: Error Handling
+        try:
             genai.configure(api_key=self.api_key)
             logger.info("AI Engine: Gemini API configured.")
             
             available_models = []
-            try: # Rule 4: Error Handling for API calls
+            try:
                 # Attempt to list models to verify API key and connectivity
                 for m in genai.list_models():
-                    # Ensure model supports content generation and potentially vision (for files)
                     if 'generateContent' in m.supported_generation_methods:
                         available_models.append(m.name)
                 logger.info(f"AI Engine: Found {len(available_models)} available models supporting generateContent.")
             except Exception as e:
                 self.last_error = f"Failed to list Gemini models (API Key or network issue?): {e}"
-                logger.error(self.last_error, exc_info=True) # Rule 4
+                logger.error(self.last_error, exc_info=True)
                 return # Stop if we can't even list models
 
-            # Prioritized list for model selection. Flash models are generally faster and cheaper.
-            # 1.5-flash-latest and 1.5-pro-latest are the preferred stable versions.
             preferred = [
-                "models/gemini-1.5-flash-latest", # Faster, cost-effective for most tasks
                 "models/gemini-1.5-flash", 
-                "models/gemini-1.5-pro-latest",   # More capable, higher token limit, good for complex reasoning
+                "models/gemini-1.5-flash-latest",
                 "models/gemini-1.5-pro",
-                "models/gemini-pro"               # Fallback, older, still capable but less powerful
+                "models/gemini-1.5-pro-latest",
+                "models/gemini-pro" # Fallback to gemini-pro if 1.5-flash/pro not available
             ]
             
             selected_model_name = None
@@ -62,27 +56,26 @@ class AIEngine:
                     selected_model_name = p
                     break
             
-            # If no preferred model found, try any available gemini model as a last resort
+            # If no preferred model found, try any available gemini model
             if not selected_model_name and available_models:
                 for m in available_models:
                     if "gemini" in m.lower(): # Case-insensitive check
                         selected_model_name = m
                         break
-                if selected_model_name:
-                    logger.info(f"AI Engine: Fallback to a generic Gemini model: {selected_model_name}") # Rule 4
+                logger.info(f"AI Engine: Fallback to a generic Gemini model: {selected_model_name}")
 
 
             if selected_model_name:
                 self.model = genai.GenerativeModel(selected_model_name)
                 self.last_error = None # Clear any previous errors
-                logger.info(f"AI Engine: Successfully selected and initialized model: {selected_model_name}") # Rule 4
+                logger.info(f"AI Engine: Successfully selected and initialized model: {selected_model_name}")
             else:
                 self.last_error = "No suitable Gemini model found that supports content generation."
-                logger.error(self.last_error) # Rule 4
+                logger.error(self.last_error)
                 
         except Exception as e:
             self.last_error = f"CRITICAL AI Engine setup error: {e}"
-            logger.critical(self.last_error, exc_info=True) # Rule 4
+            logger.critical(self.last_error, exc_info=True)
 
     def get_chat_response(self, content_parts: list, lang: str = "gr", manual_file_content: Optional[str] = None): # MODIFIED
         """
@@ -95,7 +88,7 @@ class AIEngine:
         """
         if not self.model: 
             error_message = f"⚠️ AI Offline ({self.last_error or 'Model not initialized'})"
-            logger.error(f"AI Engine: Cannot get chat response because model is not initialized. Error: {self.last_error}") # Rule 4
+            logger.error(f"AI Engine: Cannot get chat response because model is not initialized. Error: {self.last_error}")
             return error_message
         
         target_lang = "GREEK" if lang == 'gr' else "ENGLISH"
@@ -113,46 +106,28 @@ class AIEngine:
                - If the solution is in the manuals, explain it step-by-step.
                - Cite sources: If specific to a manual, mention the filename. If general knowledge, state "⚠️ **Πηγή:** Γενική Γνώση (Δεν βρέθηκε στα εγχειρίδια)".
                - Be concise and provide actionable advice.
-               - If the information is not in the provided documents, state that clearly and offer general advice if appropriate.
             
-            OUTPUT LANGUAGE: Ensure your entire response is in {target_lang}.
-
             OUTPUT FORMAT:
             - **Diagnosis**: What is the problem?
-            - **Solution**: Step-by-step solution.
-            - **Recommendation**: Any additional advice or next steps.
+            - **Solution**: Step-by-step fix.
+            - **Tools**: What tools are needed?
+            
+            LANGUAGE: Answer ONLY in {target_lang}.
             """
         }
         
-        full_content_to_send = [system_instruction_part] + content_parts
-        
-        # Add manual_file_content as an additional text part if provided
-        if manual_file_content:
-            full_content_to_send.append({
-                "text": f"ADDITIONAL MANUAL CONTEXT (Relevant to selected device):\n{manual_file_content}"
-            })
+        try:
+            # Combine system instruction with other content parts
+            full_content_to_send = [system_instruction_part] + content_parts
+            
+            # NEW: Add manual_file_content if provided
+            if manual_file_content:
+                full_content_to_send.append({"text": f"Συνημμένο Manual Content: {manual_file_content}"})
+                logger.info("Added manual_file_content to AI request.")
 
-        try: # Rule 4: Error Handling
-            # Use `stream=True` for better UX in Streamlit, showing response chunk by chunk.
-            # For this simple implementation, we'll fetch the full response at once.
-            response = self.model.generate_content(
-                full_content_to_send,
-                stream=False, # Set to True if Streamlit UI needs chunked response
-                safety_settings=[
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                ]
-            )
-            # Access the response text. For stream=True, this would be an iteration.
+            response = self.model.generate_content(full_content_to_send)
             return response.text
+            
         except Exception as e:
-            error_message = f"❌ AI Generation Error: {e}"
-            logger.error(f"AI Engine: Failed to generate content: {e}", exc_info=True) # Rule 4
-            # Check for specific known errors for better user feedback
-            if "429" in str(e):
-                error_message += " (Quota Exceeded)"
-            elif "API_KEY_INVALID" in str(e):
-                error_message += " (Invalid API Key)"
-            return error_message
+            logger.error(f"AI Engine: Error generating content: {e}", exc_info=True)
+            return f"⚠️ AI Error during content generation: {str(e)}"

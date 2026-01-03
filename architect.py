@@ -15,7 +15,7 @@ except ImportError:
     st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v20 (Self-Evolution)", page_icon="🧬", layout="wide")
+st.set_page_config(page_title="Architect AI v22 (UI Fix)", page_icon="🏗️", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
@@ -31,11 +31,10 @@ PROTECTED_FEATURES = [
 # --- 3. HELPER FUNCTIONS ---
 
 def get_project_structure():
-    """Διαβάζει τη δομή του φακέλου (ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΜΕΝΟΥ ΤΟΥ ΕΑΥΤΟΥ ΤΟΥ)."""
+    """Διαβάζει τη δομή του φακέλου."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     file_contents = {}
     ignore_dirs = {'.git', '__pycache__', 'venv', '.streamlit', 'backups'} 
-    # ΑΦΑΙΡΕΣΑΜΕ ΤΟ architect.py ΑΠΟ ΤΑ IGNORED FILES
     ignore_files = {'.DS_Store', 'token.json', 'credentials.json', 'secrets.toml'} 
 
     for dirpath, dirnames, filenames in os.walk(root_dir):
@@ -88,6 +87,8 @@ def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(target_model)
     
+    config = genai.types.GenerationConfig(temperature=0.1, top_p=0.95, top_k=64, max_output_tokens=8192)
+    
     prompt = f"""
     CRITICAL FIX REQUEST (COMMERCIAL GRADE):
     The Python code for '{file_path}' has a SYNTAX ERROR.
@@ -99,26 +100,21 @@ def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     Fix it immediately. Return ONLY the corrected code block.
     """
     try:
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt, generation_config=config)
         return response.text
     except:
         return None
 
 def apply_changes_from_response(response_text, api_key):
-    """
-    Εφαρμογή αλλαγών με Syntax Check & Self-Healing Loop.
-    """
+    """Εφαρμογή αλλαγών με Syntax Check & Self-Healing Loop."""
     pattern = r"### FILE: (.+?)\n.*?```(?:python)?\n(.*?)```"
     matches = re.findall(pattern, response_text, re.DOTALL)
     
     results = []
-    
-    if not matches:
-        return "ℹ️ Δεν βρέθηκαν αλλαγές κώδικα."
+    if not matches: return "ℹ️ Δεν βρέθηκαν αλλαγές κώδικα."
 
     for file_path, code_content in matches:
-        file_path = file_path.strip()
-        file_path = file_path.replace("\\", "/") 
+        file_path = file_path.strip().replace("\\", "/") 
         if file_path.startswith("./"): file_path = file_path[2:]
         
         full_path = os.path.abspath(file_path)
@@ -128,7 +124,6 @@ def apply_changes_from_response(response_text, api_key):
             results.append(f"⛔ SECURITY ALERT: Εκτός φακέλου ({file_path})")
             continue
 
-        # --- SELF HEALING LOOP ---
         attempts = 0
         max_retries = 2
         success = False
@@ -175,9 +170,10 @@ def generate_with_auto_pilot(strategy_name, parts, api_key):
     target_model_name = get_best_available_model(api_key)
     try:
         model = genai.GenerativeModel(target_model_name)
+        config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
         safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
                   ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-        response = model.generate_content(parts, safety_settings=safety)
+        response = model.generate_content(parts, safety_settings=safety, generation_config=config)
         return response.text
     except Exception as e:
         return f"CRITICAL AI ERROR: {str(e)}"
@@ -185,10 +181,9 @@ def generate_with_auto_pilot(strategy_name, parts, api_key):
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🧬 Architect AI v20 (Self-Evolution)")
+    st.title("🏗️ Architect AI v22 (UI Fix)")
     
     project_files = get_project_structure()
-    # Προσθέτουμε και το 'architect.py' ρητά στη λίστα
     file_list = ["None (Global Context)", "architect.py"] + [f for f in project_files.keys() if f != "architect.py"]
 
     with st.sidebar:
@@ -199,21 +194,15 @@ def main():
             st.success("Key loaded from secrets")
         
         st.markdown("---")
-        st.subheader("🛠️ Strategy & Focus")
+        # --- ΜΕΤΑΚΙΝΗΣΗ AUDIO ΣΤΟ SIDEBAR ΓΙΑ ΣΤΑΘΕΡΟΤΗΤΑ ---
+        st.subheader("🎙️ Voice Command")
+        audio = mic_recorder(start_prompt="Record", stop_prompt="Stop", key='recorder')
         
-        selected_strategy = st.selectbox(
-            "Strategy", 
-            ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation", "Self-Upgrade"]
-        )
-        
-        focus_file = st.selectbox(
-            "Focus File (Target)",
-            file_list,
-            index=0
-        )
-
         st.markdown("---")
-        auto_apply = st.checkbox("Auto-Apply Changes", value=False, help="Αν κλειστό, θα εμφανιστεί κουμπί 'SAVE' στο τέλος.")
+        st.subheader("🛠️ Tools")
+        selected_strategy = st.selectbox("Strategy", ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation", "Self-Upgrade"])
+        focus_file = st.selectbox("Focus File", file_list, index=0)
+        auto_apply = st.checkbox("Auto-Apply Changes", value=False)
         
         st.caption("Active Rules:")
         for rule in PROTECTED_FEATURES: st.caption(rule)
@@ -225,15 +214,16 @@ def main():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    col1, col2 = st.columns([0.85, 0.15])
-    with col1: user_in = st.chat_input("Εντολή...")
-    with col2: 
-        st.write("🎙️")
-        audio = mic_recorder(start_prompt="Rec", stop_prompt="Stop", key='recorder')
+    # --- UI FIX: ΤΟ CHAT INPUT ΜΟΝΟ ΤΟΥ ΣΤΟ ΤΕΛΟΣ ---
+    # Το βγάλαμε από τις κολώνες (st.columns) για να μην εξαφανίζεται
+    user_in = st.chat_input("Δώσε εντολή στον Αρχιτέκτονα...")
 
-    final_input = user_in
+    final_input = None
     is_audio = False
-    if audio: 
+
+    if user_in:
+        final_input = user_in
+    elif audio: 
         final_input = audio['bytes']
         is_audio = True
 
@@ -249,24 +239,21 @@ def main():
         prompt_text = f"""
         ROLE: Elite Senior Python Architect (Mastro Nek). 
         CONTEXT: COMMERCIAL SAAS APPLICATION (HVAC).
-        TARGET PLATFORMS: Android, iOS, Windows, Web.
         GOAL: Profitability, Scalability, Clean Architecture.
         SELF-AWARENESS: You can see and modify your own source code (architect.py).
-        LANG: GREEK.
+        STRICT GREEK LANGUAGE.
         
         STRATEGY: {selected_strategy}
         FOCUS FILE: {focus_file if focus_file != "None (Global Context)" else "ALL"}
-        RULES: {PROTECTED_FEATURES}
         
         INSTRUCTIONS:
-        1. Analyze the request with a COMMERCIAL mindset (Stability, Speed).
-        2. Prioritize changes in FOCUS FILE.
-        3. Provide FULL COMPLETE CODE blocks ready for production.
+        1. Analyze the request.
+        2. Provide FULL COMPLETE CODE blocks.
         
-        FORMAT FOR CHANGES:
+        FORMAT:
         ### FILE: path/to/filename.py
         ```python
-        # Full content of the file
+        # Full content
         ```
         
         CONTEXT:
@@ -279,15 +266,13 @@ def main():
         if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
 
         with st.chat_message("assistant"):
-            with st.spinner(f"O Αρχιτέκτονας σχεδιάζει (Commercial SaaS Mode)..."):
+            with st.spinner(f"O Αρχιτέκτονας σχεδιάζει..."):
                 response_text = generate_with_auto_pilot(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
                 # --- SAVE LOGIC ---
-                has_code = "### FILE:" in response_text
-                
-                if has_code:
+                if "### FILE:" in response_text:
                     if auto_apply:
                         with st.status("Αυτόματη Εφαρμογή...", expanded=True) as status:
                             result_log = apply_changes_from_response(response_text, api_key)
@@ -300,17 +285,15 @@ def main():
                                 status.update(label="Πρόβλημα.", state="error")
                     else:
                         st.info("💡 Βρέθηκαν αλλαγές στον κώδικα.")
-                        if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ ΑΛΛΑΓΩΝ (SAVE)", type="primary", use_container_width=True):
+                        # Κουμπί Save
+                        if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ ΑΛΛΑΓΩΝ", type="primary", use_container_width=True):
                             with st.status("Αποθήκευση...", expanded=True):
                                 result_log = apply_changes_from_response(response_text, api_key)
                                 st.code(result_log)
-                            
                             if "UPDATED" in result_log:
-                                st.success("✅ Όλα αποθηκεύτηκαν επιτυχώς!")
+                                st.success("✅ Αποθηκεύτηκε!")
                                 time.sleep(1.5)
                                 st.rerun()
-                            else:
-                                st.error("❌ Δεν έγινε αποθήκευση (δείτε το log).")
 
 if __name__ == "__main__":
     main()
