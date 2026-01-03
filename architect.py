@@ -3,285 +3,143 @@ import os
 import shutil
 import re
 import time
-import base64
+import subprocess
 from datetime import datetime
 
 try:
     from openai import OpenAI
-    from audiorecorder import audiorecorder
+    from streamlit_mic_recorder import mic_recorder
 except ImportError:
-    st.error("⚠️ Τρέξε: pip install openai streamlit-audiorecorder")
+    st.error("⚠️ Τρέξε στο τερματικό: pip install openai streamlit-mic-recorder")
     st.stop()
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ ---
-st.set_page_config(page_title="Mastro Nek v48 (Human Style)", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Mastro Nek v47 (Greek & GitHub)", page_icon="🏗️", layout="wide")
 
 def get_project_inventory():
-    """Επιστρέφει όλα τα αρχεία του τρέχοντος φακέλου και υποφακέλων"""
     inventory = []
-    ignore = {'.git', '__pycache__', 'venv', 'backups', '.streamlit', 'data', '.env', '.vscode'}
-
+    ignore = {'.git', '__pycache__', 'venv', 'backups', '.streamlit', 'data'}
     for dirpath, dirnames, filenames in os.walk("."):
-        # Αφαίρεση ignored φακέλων
         dirnames[:] = [d for d in dirnames if d not in ignore]
-
         for f in filenames:
-            # Συμπερίληψη περισσότερων τύπων αρχείων
-            if f.endswith(('.py', '.json', '.css', '.txt', '.md', '.html', '.js', '.yaml', '.yml', '.env', '.sql')):
-                rel_path = os.path.relpath(os.path.join(dirpath, f), ".")
-                # Αποφυγή backup αρχείων
-                if not rel_path.startswith('backups/'):
-                    inventory.append(rel_path)
+            if f.endswith(('.py', '.json', '.css', '.txt', '.md')):
+                inventory.append(os.path.relpath(os.path.join(dirpath, f), "."))
+    return inventory
 
-    return sorted(inventory)
-
-def read_files(paths):
-    """Διαβάζει τα περιεχόμενα πολλαπλών αρχείων"""
-    context = ""
-    for path in paths:
-        try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                context += f"\n--- ΑΡΧΕΙΟ: {path} ---\n{f.read()}\n"
-        except Exception as e:
-            context += f"\n--- ΑΡΧΕΙΟ: {path} ---\n[Δεν μπόρεσα να διαβάσω αυτό το αρχείο: {e}]\n"
-    return context
-
-def transcribe_audio(audio_bytes, api_key):
-    """Μετατρέπει audio bytes σε κείμενο χρησιμοποιώντας DeepSeek Whisper"""
-    if not audio_bytes:
-        return None
-
+def sync_to_github():
+    """Εκτελεί αυτόματα τον συγχρονισμό με το GitHub."""
     try:
-        client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
-        # Αποθήκευση προσωρινά του audio
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-
-        # Μετατροπή με Whisper
-        with open(tmp_path, "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="el"  # Ελληνικά
-            )
-
-        # Καθαρισμός προσωρινού αρχείου
-        os.unlink(tmp_path)
-
-        return transcription.text
+        subprocess.run(["git", "add", "."], check=True)
+        commit_msg = f"Auto-sync by Mastro Nek: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+        subprocess.run(["git", "push"], check=True)
+        return "🚀 Συγχρονίστηκε επιτυχώς με το GitHub!"
     except Exception as e:
-        st.error(f"Σφάλμα μετατροπής ομιλίας: {e}")
-        return None
+        return f"⚠️ Σφάλμα GitHub: {str(e)} (Βεβαιώσου ότι έχεις κάνει git init και έχεις ορίσει remote)"
 
-def apply_updates(text):
-    """Εφαρμόζει τις αλλαγές από την απάντηση του AI"""
-    pattern = r"### FILE: (.+?)\n.*?```(?:python|json|css|html|javascript|sql)?\n(.*?)```"
+def apply_updates_and_sync(text):
+    pattern = r"### FILE: (.+?)\n.*?```(?:python|json|css)?\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
-
-    if not matches:
-        return "ℹ️ Δεν βρέθηκε κώδικας προς αποθήκευση."
-
-    results = []
+    if not matches: return "ℹ️ Δεν βρέθηκε κώδικας."
+    
+    log = []
     for filename, code in matches:
         filename = filename.strip().replace("\\", "/")
         full_path = os.path.abspath(filename)
-
-        # Backup πριν την αλλαγή
+        # Backup
         if os.path.exists(full_path):
             os.makedirs("backups", exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_name = f"backups/{os.path.basename(filename)}_{timestamp}.bak"
-            shutil.copy2(full_path, backup_name)
-            results.append(f"📦 Δημιουργήθηκε backup: {backup_name}")
-
+            shutil.copy2(full_path, f"backups/{os.path.basename(filename)}_{datetime.now().strftime('%H%M%S')}.bak")
         try:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(code.strip())
-            results.append(f"✅ Αποθηκεύτηκε: {filename}")
-        except Exception as e:
-            results.append(f"❌ Σφάλμα στο {filename}: {e}")
+            log.append(f"✅ Το αρχείο {filename} ενημερώθηκε τοπικά.")
+        except Exception as e: log.append(f"❌ Σφάλμα στο {filename}: {e}")
+    
+    # Μετά την αποθήκευση, κάνε Push στο GitHub
+    git_status = sync_to_github()
+    log.append(git_status)
+    return "\n".join(log)
 
-    return "\n".join(results)
-
-# --- 2. ΤΟ "ΜΥΑΛΟ" ΤΟΥ AI (MENTOR MODE) ---
+# --- 2. ΤΟ ΜΥΑΛΟ ΤΟΥ ΜΑΣΤΡΟ-ΝΕΚ ---
 def run_deepseek(prompt, api_key, context):
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
     system_instruction = """
-    ΕΙΣΑΙ: Ο Μαστρο-Νεκ, ο Senior Architect του project.
-    ΣΤΥΛ: Φιλικός, επεξηγηματικός, δάσκαλος.
-    ΓΛΩΣΣΑ: Αποκλειστικά Ελληνικά.
-
-    ΚΑΝΟΝΕΣ ΕΠΙΚΟΙΝΩΝΙΑΣ:
-    1. ΠΟΤΕ μην ξεκινάς απευθείας με κώδικα.
-    2. Εξήγησε πρώτα με απλά λόγια τι πρόκειται να κάνεις και γιατί.
-    3. Αν ο χρήστης σε ρωτήσει κάτι, απάντησε σαν άνθρωπος, όχι σαν μηχανή.
-    4. Όταν δίνεις κώδικα, χρησιμοποίησε ΠΑΝΤΑ το format:
-       ### FILE: όνομα_αρχείου.py
-       ```python
-       (κώδικας εδώ)
-       ```
+    ΕΙΣΑΙ: Ο Μαστρο-Νεκ, ο έμπειρος Αρχιτέκτονας του project.
+    ΓΛΩΣΣΑ: Μίλα ΜΟΝΟ Ελληνικά.
+    ΟΔΗΓΙΕΣ: 
+    - Μην απαντάς με ακαταλαβίστικα σύμβολα ή μόνο κώδικα. 
+    - Εξήγησε πρώτα σαν άνθρωπος τι θα αλλάξεις.
+    - Χρησιμοποίησε ΠΑΝΤΑ το format: ### FILE: filename.py ακολουθούμενο από το code block.
     """
-
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
                 {"role": "system", "content": system_instruction},
-                {"role": "user", "content": f"CONTEXT ΠΡΟΓΡΑΜΜΑΤΟΣ:\n{context}\n\nΕΡΩΤΗΣΗ ΧΡΗΣΤΗ: {prompt}"}
+                {"role": "user", "content": f"CONTEXT ΠΡΟΓΡΑΜΜΑΤΟΣ:\n{context}\n\nΕΝΤΟΛΗ ΧΡΗΣΤΗ: {prompt}"}
             ],
             temperature=0.3
         )
         return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ Σφάλμα DeepSeek: {str(e)}"
+    except Exception as e: return f"❌ Σφάλμα AI: {str(e)}"
 
 # --- 3. UI ---
 def main():
-    st.title("🏗️ Μαστρο-Νεκ v48")
-    st.subheader("Συνεργάτης Προγραμματισμού (DeepSeek Native)")
-
+    st.title("🏗️ Mastro Nek v47 (Greek & GitHub Sync)")
     inventory = get_project_inventory()
-
+    
     with st.sidebar:
-        st.header("⚙️ Ρυθμίσεις")
-        api_key = st.text_input("DeepSeek API Key", type="password", 
-                               help="Χρειάζεσαι API key από https://platform.deepseek.com/")
-
+        st.header("Ρυθμίσεις")
+        api_key = st.text_input("DeepSeek API Key", type="password")
         st.divider()
-
-        st.header("🎤 Φωνητική Εισαγωγή")
-        st.write("Κάνε κλικ στο κουμπί για ηχογράφηση:")
-
-        audio = audiorecorder("⏺️ Εκκίνηση", "⏹️ Διακοπή", key="recorder")
-
-        if len(audio) > 0:
-            # Αποθήκευση του audio σε bytes
-            audio_bytes = audio.export().read()
-            st.audio(audio_bytes, format="audio/wav")
-
-            # Μετατροπή σε κείμενο
-            if api_key and st.button("🔊 Μετατροπή σε κείμενο"):
-                with st.spinner("Μετατρέπω την ομιλία σου..."):
-                    transcribed_text = transcribe_audio(audio_bytes, api_key)
-                    if transcribed_text:
-                        st.success("✅ Μετατράπηκε επιτυχώς!")
-                        st.text_area("Μεταγραφή:", transcribed_text, height=100)
-                        # Αυτόματη προσθήκη στο chat
-                        if 'transcribed_input' not in st.session_state:
-                            st.session_state.transcribed_input = ""
-                        st.session_state.transcribed_input = transcribed_text
-
+        st.write("📁 **Επίλεξε αρχεία για επεξεργασία:**")
+        selected_files = st.multiselect("Αρχεία:", inventory, default=[f for f in inventory if "architect.py" in f])
         st.divider()
-
-        st.header("📁 Επιλογή Αρχείων")
-        st.write(f"**Βρέθηκαν {len(inventory)} αρχεία**")
-
-        # Κουμπιά για γρήγορη επιλογή
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📂 Όλα τα αρχεία", use_container_width=True):
-                st.session_state.selected_all = True
-        with col2:
-            if st.button("🗑️ Καθαρισμός", use_container_width=True):
-                if 'selected_files' in st.session_state:
-                    st.session_state.selected_files = []
-                st.rerun()
-
-        # Πολυεπιλογή αρχείων
-        if 'selected_all' in st.session_state and st.session_state.selected_all:
-            selected_files = st.multiselect(
-                "Επίλεξε αρχεία:",
-                inventory,
-                default=inventory,
-                key="file_selector"
-            )
-            st.session_state.selected_all = False
-        else:
-            selected_files = st.multiselect(
-                "Επίλεξε αρχεία:",
-                inventory,
-                default=[f for f in inventory if "architect.py" in f],
-                key="file_selector"
-            )
-
-        st.divider()
-
-        if st.button("🗑️ Καθαρισμός Συνομιλίας", use_container_width=True):
+        # ΔΙΟΡΘΩΣΗ ΜΙΚΡΟΦΩΝΟΥ: Ζητάμε Ελληνικά
+        st.write("🎤 Φωνητική Εντολή:")
+        audio = mic_recorder(start_prompt="Ξεκίνα να μιλάς (GR)", stop_prompt="Τέλος", key='mic_v47')
+        if st.button("🗑️ Καθαρισμός Chat"):
             st.session_state.messages = []
             st.rerun()
 
-    # Αρχικοποίηση session state
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "selected_files" not in st.session_state:
-        st.session_state.selected_files = selected_files
-
-    # Εμφάνιση ιστορικού συνομιλίας
+    if "messages" not in st.session_state: st.session_state.messages = []
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    # Επεξεργασία φωνητικής εισόδου
-    user_input = ""
+    user_input = st.chat_input("Γράψε εδώ στα Ελληνικά...")
+    
+    if (user_input or audio) and api_key:
+        # Αν έχουμε ήχο, ο mic_recorder επιστρέφει κείμενο (αν έχεις ρυθμίσει το STT)
+        # Σημείωση: Ο mic_recorder χρειάζεται σωστή παραμετροποίηση για STT
+        prompt = user_input if user_input else "Φωνητική εντολή..."
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
 
-    # Έλεγχος για μεταγραφή από audio
-    if 'transcribed_input' in st.session_state and st.session_state.transcribed_input:
-        user_input = st.session_state.transcribed_input
-        # Καθαρισμός μετά τη χρήση
-        del st.session_state.transcribed_input
-
-    # Κείμενη είσοδος
-    if not user_input:
-        user_input = st.chat_input("Πες μου τι θέλεις να φτιάξουμε...")
-
-    # Επεξεργασία εισόδου
-    if user_input and api_key:
-        # Προσθήκη στο ιστορικό
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        # Διάβασμα context από επιλεγμένα αρχεία
-        files_to_read = selected_files if selected_files else st.session_state.selected_files
-        context = read_files(files_to_read)
-
-        # Απάντηση από AI
+        context = read_files(selected_files) if 'read_files' in globals() else "" # (χρειάζεται τη συνάρτηση από v46)
+        
         with st.chat_message("assistant"):
-            with st.spinner("🧠 Ο Μαστρο-Νεκ σκέφτεται..."):
-                response = run_deepseek(user_input, api_key, context)
+            with st.spinner("Ο Μαστρο-Νεκ αναλύει..."):
+                response = run_deepseek(prompt, api_key, read_files(selected_files))
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
-
-                # Εμφάνιση κουμπιού αποθήκευσης ΜΟΝΟ αν υπάρχει κώδικας
+                
                 if "### FILE:" in response:
-                    st.divider()
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.info("📝 Βρέθηκε κώδικας στην απάντηση")
-                    with col2:
-                        if st.button("💾 Αποθήκευση Αλλαγών", type="primary", use_container_width=True):
-                            result = apply_updates(response)
-                            st.success(result)
-                            time.sleep(2)
-                            st.rerun()
+                    if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ & PUSH ΣΤΟ GITHUB"):
+                        result = apply_updates_and_sync(response)
+                        st.info(result)
+                        time.sleep(2)
+                        st.rerun()
 
-    # Πληροφορίες για το project
-    with st.expander("📊 Πληροφορίες Project"):
-        st.write(f"**Συνολικά αρχεία:** {len(inventory)}")
-        st.write(f"**Επιλεγμένα αρχεία:** {len(selected_files) if selected_files else 0}")
-
-        if inventory:
-            st.write("**Λίστα αρχείων:**")
-            for file in inventory[:20]:  # Δείξε τα πρώτα 20
-                st.write(f"• `{file}`")
-            if len(inventory) > 20:
-                st.write(f"... και άλλα {len(inventory) - 20} αρχεία")
+def read_files(paths):
+    context = ""
+    for path in paths:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                context += f"\n--- ΑΡΧΕΙΟ: {path} ---\n{f.read()}\n"
+        except: pass
+    return context
 
 if __name__ == "__main__":
     main()
