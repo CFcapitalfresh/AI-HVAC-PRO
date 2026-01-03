@@ -1,69 +1,81 @@
 """
-Κύριο πρόγραμμα εκτέλεσης
+Κύριο αρχείο για το σύστημα AI HVAC.
+Ενσωματώνει το σύστημα φωνητικών εντολών και τον έλεγχο HVAC.
 """
 
-from voice_command_system import VoiceCommandSystem
-from command_examples import CustomVoiceCommands
-import argparse
+import sys
+import subprocess
 
-def main():
-    """Κύρια λειτουργία"""
-    
-    parser = argparse.ArgumentParser(description="Σύστημα Φωνητικών Εντολών")
-    parser.add_argument("--mode", choices=["interactive", "background"], 
-                       default="interactive", help="Λειτουργία λειτουργίας")
-    parser.add_argument("--language", default="el-GR", 
-                       help="Γλώσσα αναγνώρισης (π.χ. el-GR, en-US)")
-    
-    args = parser.parse_args()
-    
-    # Δημιουργία συστήματος
-    print("=" * 50)
-    print("ΣΥΣΤΗΜΑ ΦΩΝΗΤΙΚΩΝ ΕΝΤΟΛΩΝ")
-    print("Αρχιτεκτονική: Μαστρο-Νεκ")
-    print("=" * 50)
-    
-    system = VoiceCommandSystem(language=args.language)
-    
-    # Προσθήκη προσαρμοσμένων εντολών
-    custom_commands = CustomVoiceCommands(system)
-    custom_commands.add_greeting_command("χρήστη")
-    
-    # Εκτύπωση πληροφοριών
-    print(f"\nΓλώσσα: {system.language}")
-    print(f"Εγγεγραμμένες εντολές: {len(system.commands)}")
-    print("\nΔιαθέσιμες εντολές:")
-    for cmd in sorted(system.commands.keys()):
-        print(f"  • {cmd}")
-    
-    print("\n" + "=" * 50)
-    print("Το σύστημα είναι έτοιμο!")
-    print("Πείτε 'βοήθεια' για λίστα εντολών")
-    print("Πείτε 'σταμάτα' για τερματισμό")
-    print("=" * 50 + "\n")
-    
-    # Εκκίνηση ανάλογα με τη λειτουργία
-    if args.mode == "background":
-        print("Εκκίνηση σε λειτουργία παρασκηνίου...")
-        thread = system.start_background_listening()
+def install_package(package_name):
+    """Εγκαθιστά μια βιβλιοθήκη Python αν λείπει."""
+    try:
+        __import__(package_name)
+    except ImportError:
+        print(f"Βιβλιοθήκη '{package_name}' δεν βρέθηκε. Εγκατάσταση...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+        print(f"Η βιβλιοθήκη '{package_name}' εγκαταστάθηκε επιτυχώς.")
+
+# Εγκατάσταση απαραίτητων βιβλιοθηκών
+required_packages = ['pyttsx3', 'speech_recognition', 'pyserial']
+for package in required_packages:
+    install_package(package)
+
+from voice_command_system import VoiceCommandSystem
+from hvac_controller import HVACController
+import time
+
+class AIHVACSystem:
+    def __init__(self):
+        """Αρχικοποίηση του συστήματος AI HVAC."""
+        self.voice_system = VoiceCommandSystem()
+        self.hvac_controller = HVACController()
+        self.running = True
+
+    def process_command(self, command):
+        """Επεξεργάζεται φωνητικές εντολές και ελέγχει το HVAC."""
+        command = command.lower()
+
+        if "ενεργοποίησε" in command and "κλιματισμό" in command:
+            self.hvac_controller.turn_on()
+            return "Κλιματισμός ενεργοποιήθηκε."
+        elif "απενεργοποίησε" in command and "κλιματισμό" in command:
+            self.hvac_controller.turn_off()
+            return "Κλιματισμός απενεργοποιήθηκε."
+        elif "ρύθμισε θερμοκρασία" in command:
+            try:
+                temp = int(''.join(filter(str.isdigit, command)))
+                self.hvac_controller.set_temperature(temp)
+                return f"Θερμοκρασία ρυθμίστηκε στους {temp}°C."
+            except ValueError:
+                return "Δεν μπόρεσα να διαβάσω τη θερμοκρασία."
+        elif "κατάσταση" in command:
+            status = self.hvac_controller.get_status()
+            return f"Κατάσταση HVAC: {status}"
+        elif "βγες" in command or "τερμάτισε" in command:
+            self.running = False
+            return "Τερματισμός συστήματος."
+        else:
+            return "Δεν κατάλαβα την εντολή. Δοκίμασε ξανά."
+
+    def run(self):
+        """Κύριος βρόχος λειτουργίας του συστήματος."""
+        print("=== Σύστημα AI HVAC Ενεργοποιήθηκε ===")
+        print("Πες 'βγες' ή 'τερμάτισε' για έξοδο.")
         
-        try:
-            # Κρατάμε το πρόγραμμα ανοιχτό
-            while system.is_listening:
-                user_input = input("Πατήστε Enter για τερματισμό: ")
-                if user_input == "":
-                    system.is_listening = False
-                    break
-        except KeyboardInterrupt:
-            system.is_listening = False
-            print("\nΤερματισμός από χρήστη...")
+        while self.running:
+            print("\nΑκούω... (Πες 'ενεργοποίησε κλιματισμό', 'ρύθμισε θερμοκρασία 22', κλπ.)")
+            command = self.voice_system.listen()
             
-    else:  # interactive mode
-        system.start_listening_loop()
-    
-    # Αποθήκευση εντολών
-    system.save_commands()
-    print("\nΟλοκλήρωση προγράμματος")
+            if command:
+                print(f"Εντολή: {command}")
+                response = self.process_command(command)
+                self.voice_system.speak(response)
+                print(f"Απόκριση: {response}")
+            
+            time.sleep(1)
+
+        print("Σύστημα AI HVAC τερματίστηκε.")
 
 if __name__ == "__main__":
-    main()
+    system = AIHVACSystem()
+    system.run()

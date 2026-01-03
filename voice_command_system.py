@@ -1,211 +1,131 @@
 """
-Σύστημα Φωνητικών Εντολών
-Αρχιτεκτονική: Μαστρο-Νεκ
+Σύστημα φωνητικών εντολών με χρήση speech recognition και text-to-speech.
 """
 
-import speech_recognition as sr
+import sys
+import subprocess
+
+def install_package(package_name):
+    """Εγκαθιστά μια βιβλιοθήκη Python αν λείπει."""
+    try:
+        __import__(package_name)
+    except ImportError:
+        print(f"Βιβλιοθήκη '{package_name}' δεν βρέθηκε. Εγκατάσταση...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+        print(f"Η βιβλιοθήκη '{package_name}' εγκαταστάθηκε επιτυχώς.")
+
+# Εγκατάσταση απαραίτητων βιβλιοθηκών
+install_package('pyttsx3')
+install_package('SpeechRecognition')
+install_package('pyaudio')
+
 import pyttsx3
-import json
-import os
-from datetime import datetime
-from typing import Dict, List, Optional, Callable
-import threading
-import queue
+import speech_recognition as sr
+import time
 
 class VoiceCommandSystem:
-    """
-    Κύρια κλάση για το σύστημα φωνητικών εντολών
-    """
-    
-    def __init__(self, language: str = "el-GR"):
-        """
-        Αρχικοποίηση συστήματος
-        
-        Args:
-            language: Γλώσσα αναγνώρισης (προεπιλογή: Ελληνικά)
-        """
-        self.language = language
+    def __init__(self):
+        """Αρχικοποίηση του συστήματος φωνητικών εντολών."""
         self.recognizer = sr.Recognizer()
-        self.engine = pyttsx3.init()
-        self.commands: Dict[str, Callable] = {}
-        self.is_listening = False
-        self.command_queue = queue.Queue()
+        self.microphone = sr.Microphone()
+        self.tts_engine = self.init_tts()
         
-        # Ρυθμίσεις φωνής
-        self._setup_voice()
-        
-        # Βασικές εντολές
-        self._register_default_commands()
-        
-    def _setup_voice(self):
-        """Ρύθμιση παραμέτρων φωνής"""
-        voices = self.engine.getProperty('voices')
-        # Επιλογή ελληνικής φωνής αν υπάρχει
-        for voice in voices:
-            if 'greek' in voice.name.lower() or 'el' in voice.id.lower():
-                self.engine.setProperty('voice', voice.id)
-                break
-        
-        self.engine.setProperty('rate', 150)  # Ταχύτητα ομιλίας
-        self.engine.setProperty('volume', 0.9)  # Ένταση
-        
-    def _register_default_commands(self):
-        """Εγγραφή προεπιλεγμένων εντολών"""
-        
-        def help_command():
-            """Εντολή βοήθειας"""
-            commands_list = "\n".join([f"- {cmd}" for cmd in self.commands.keys()])
-            response = f"Διαθέσιμες εντολές:\n{commands_list}"
-            self.speak(response)
-            
-        def time_command():
-            """Εντολή ώρας"""
-            current_time = datetime.now().strftime("%H:%M")
-            self.speak(f"Η ώρα είναι {current_time}")
-            
-        def date_command():
-            """Εντολή ημερομηνίας"""
-            current_date = datetime.now().strftime("%d/%m/%Y")
-            self.speak(f"Η ημερομηνία είναι {current_date}")
-            
-        def stop_command():
-            """Εντολή διακοπής"""
-            self.speak("Διακόπτω την ακρόαση")
-            self.is_listening = False
-            
-        # Εγγραφή εντολών
-        self.register_command("βοήθεια", help_command)
-        self.register_command("ώρα", time_command)
-        self.register_command("ημερομηνία", date_command)
-        self.register_command("σταμάτα", stop_command)
-        self.register_command("τερματισμός", stop_command)
-        
-    def register_command(self, command: str, function: Callable):
+        print("Φωνητικό σύστημα αρχικοποιήθηκε.")
+
+    def init_tts(self):
+        """Αρχικοποιεί τον μηχανισμό text-to-speech."""
+        try:
+            engine = pyttsx3.init()
+            # Ρυθμίσεις ελληνικής φωνής (αν υπάρχει)
+            voices = engine.getProperty('voices')
+            for voice in voices:
+                if 'greek' in voice.name.lower() or 'el' in voice.id.lower():
+                    engine.setProperty('voice', voice.id)
+                    break
+            engine.setProperty('rate', 150)  # Ταχύτητα ομιλίας
+            return engine
+        except Exception as e:
+            print(f"Σφάλμα αρχικοποίησης TTS: {e}")
+            return None
+
+    def speak(self, text):
+        """Μετατρέπει κείμενο σε ομιλία."""
+        if self.tts_engine:
+            try:
+                print(f"Ομιλία: {text}")
+                self.tts_engine.say(text)
+                self.tts_engine.runAndWait()
+            except Exception as e:
+                print(f"Σφάλμα ομιλίας: {e}")
+        else:
+            print(f"(TTS): {text}")
+
+    def listen(self, timeout=5, phrase_time_limit=10):
         """
-        Εγγραφή νέας εντολής
+        Ακούει φωνητική εντολή και την επιστρέφει ως κείμενο.
         
         Args:
-            command: Η φωνητική εντολή
-            function: Συνάρτηση που θα εκτελεστεί
-        """
-        self.commands[command.lower()] = function
+            timeout: Μέγιστος χρόνος αναμονής για ομιλία (δευτερόλεπτα)
+            phrase_time_limit: Μέγιστος χρόνος ομιλίας (δευτερόλεπτα)
         
-    def speak(self, text: str):
-        """
-        Ομιλία κειμένου
-        
-        Args:
-            text: Κείμενο προς ομιλία
-        """
-        print(f"Σύστημα: {text}")
-        self.engine.say(text)
-        self.engine.runAndWait()
-        
-    def listen(self, timeout: int = 5, phrase_time_limit: int = 10) -> Optional[str]:
-        """
-        Ακρόαση φωνητικής εντολής
-        
-        Args:
-            timeout: Χρόνος αναμονής για ομιλία (δευτερόλεπτα)
-            phrase_time_limit: Μέγιστος χρόνος ομιλίας
-            
         Returns:
-            Το αναγνωρισμένο κείμενο ή None
+            str: Η αναγνωρισμένη φωνητική εντολή ή None αν αποτύχει.
         """
-        with sr.Microphone() as source:
-            print("Ακούω...")
-            
-            # Προσαρμογή για θόρυβο
-            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        with self.microphone as source:
+            print("Προσαρμογή στο περιβάλλον θορύβου...")
+            self.recognizer.adjust_for_ambient_noise(source, duration=1)
+            print("Μιλήστε τώρα...")
             
             try:
                 audio = self.recognizer.listen(
                     source, 
-                    timeout=timeout,
+                    timeout=timeout, 
                     phrase_time_limit=phrase_time_limit
                 )
                 
-                # Αναγνώριση ομιλίας
-                text = self.recognizer.recognize_google(
-                    audio, 
-                    language=self.language
-                )
-                
-                print(f"Αναγνώρισα: {text}")
+                print("Αναγνώριση ομιλίας...")
+                text = self.recognizer.recognize_google(audio, language="el-GR")
                 return text.lower()
                 
             except sr.WaitTimeoutError:
-                print("Χρονικό όριο αναμονής")
+                print("Χρονικό όριο αναμονής: Δεν ανιχνεύθηκε ομιλία.")
                 return None
             except sr.UnknownValueError:
-                print("Δεν κατάλαβα τι είπες")
-                self.speak("Δεν κατάλαβα, παρακαλώ επανάλαβε")
+                print("Δεν μπόρεσα να αναγνωρίσω την ομιλία.")
                 return None
             except sr.RequestError as e:
-                print(f"Σφάλμα σύνδεσης: {e}")
-                self.speak("Πρόβλημα σύνδεσης")
+                print(f"Σφάλση σύνδεσης με την υπηρεσία αναγνώρισης: {e}")
                 return None
-                
-    def process_command(self, text: str) -> bool:
-        """
-        Επεξεργασία αναγνωρισμένης εντολής
+            except Exception as e:
+                print(f"Απρόσμενο σφάλμα: {e}")
+                return None
+
+    def test_microphone(self):
+        """Δοκιμή του μικροφώνου και αναγνώρισης ομιλίας."""
+        print("=== Δοκιμή Μικροφώνου ===")
+        print("Θα ακούσω για 5 δευτερόλεπτα...")
         
-        Args:
-            text: Το αναγνωρισμένο κείμενο
+        with self.microphone as source:
+            self.recognizer.adjust_for_ambient_noise(source)
+            print("Παρακαλώ μιλήστε...")
             
-        Returns:
-            True αν βρέθηκε και εκτελέστηκε εντολή
-        """
-        if not text:
-            return False
-            
-        # Έλεγχος για ακριβή αντιστοίχιση
-        if text in self.commands:
-            self.commands[text]()
-            return True
-            
-        # Έλεγχος για μερική αντιστοίχιση
-        for command, function in self.commands.items():
-            if command in text:
-                function()
-                return True
-                
-        # Αν δεν βρέθηκε εντολή
-        self.speak(f"Δεν βρήκα εντολή για: {text}")
-        return False
-        
-    def start_listening_loop(self):
-        """Έναρξη συνεχούς ακρόασης"""
-        self.is_listening = True
-        self.speak("Σύστημα φωνητικών εντολών ενεργοποιήθηκε")
-        
-        while self.is_listening:
-            text = self.listen()
-            if text:
-                self.process_command(text)
-                
-    def start_background_listening(self):
-        """Έναρξη ακρόασης σε background thread"""
-        self.is_listening = True
-        thread = threading.Thread(target=self.start_listening_loop)
-        thread.daemon = True
-        thread.start()
-        return thread
-        
-    def save_commands(self, filename: str = "commands.json"):
-        """Αποθήκευση εντολών σε αρχείο"""
-        commands_data = {
-            "language": self.language,
-            "registered_commands": list(self.commands.keys()),
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(commands_data, f, ensure_ascii=False, indent=2)
-            
-    def load_commands(self, filename: str = "commands.json"):
-        """Φόρτωση εντολών από αρχείο"""
-        if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                print(f"Φορτώθηκαν {len(data.get('registered_commands', []))} εντολές")
+            try:
+                audio = self.recognizer.listen(source, timeout=5)
+                text = self.recognizer.recognize_google(audio, language="el-GR")
+                print(f"Αναγνώρισα: {text}")
+                return text
+            except Exception as e:
+                print(f"Σφάλμα δοκιμής: {e}")
+                return None
+
+if __name__ == "__main__":
+    # Δοκιμή του συστήματος φωνητικών εντολών
+    vcs = VoiceCommandSystem()
+    
+    # Δοκιμή μικροφώνου
+    test_result = vcs.test_microphone()
+    
+    if test_result:
+        vcs.speak(f"Αναγνώρισα: {test_result}")
+    else:
+        vcs.speak("Δοκιμή μικροφώνου απέτυχε.")
