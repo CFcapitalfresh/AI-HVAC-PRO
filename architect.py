@@ -12,14 +12,14 @@ try:
     import google.generativeai as genai
     from streamlit_mic_recorder import mic_recorder
 except ImportError:
-    st.error("⚠️ ΛΕΙΠΟΥΝ ΒΙΒΛΙΟΘΗΚΕΣ. Τρέξε: pip install --upgrade google-generativeai streamlit-mic-recorder")
+    st.error("⚠️ ΛΕΙΠΟΥΝ ΒΙΒΛΙΟΘΗΚΕΣ. Τρέξε: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v30 (FINAL)", page_icon="🏁", layout="wide")
+st.set_page_config(page_title="Architect AI v31 (Universal)", page_icon="🌐", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
-    "1. HARDCODED MODEL: Χρήση ΜΟΝΟ του 'models/gemini-1.5-flash'. Τέλος τα πειράματα.",
+    "1. UNIVERSAL FALLBACK: Δοκιμή 1.5 Flash -> Αν αποτύχει (404), αυτόματη αλλαγή σε Gemini Pro.",
     "2. FULL MEDIA: Voice & Vision.",
     "3. SELF-EVOLUTION: Πλήρης πρόσβαση στον κώδικα (architect.py).",
     "4. SAFETY: Syntax Check & Backups.",
@@ -64,39 +64,54 @@ def backup_file(file_path):
     except: pass
     return False
 
-# --- THE FINAL ENGINE (HARDCODED) ---
+# --- THE UNIVERSAL ENGINE (Flash -> Pro Fallback) ---
 
-def generate_with_hardcoded_model(strategy_name, parts, api_key):
+def generate_with_fallback_logic(strategy_name, parts, api_key):
     """
-    Εκτελεί ΜΟΝΟ με το Gemini 1.5 Flash.
+    Δοκιμάζει το Flash. Αν σκάσει (404), πάει στο Pro.
     """
     if not api_key: return "ERROR: Missing API Key."
     
-    # ΚΑΡΦΩΤΟ ΟΝΟΜΑ - ΔΕΝ ΑΛΛΑΖΕΙ
-    target_model = "models/gemini-1.5-flash"
+    genai.configure(api_key=api_key)
     
-    try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(target_model)
-        
-        # Αυστηρό config
-        config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
-        safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
-                  ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-        
-        response = model.generate_content(parts, safety_settings=safety, generation_config=config)
-        return response.text
-        
-    except Exception as e:
-        # Αν αποτύχει και αυτό, υπάρχει σοβαρό θέμα με το API Key ή τη σύνδεση
-        return f"CRITICAL ERROR ({target_model}): {str(e)}"
+    # Λίστα προτεραιότητας: Πρώτα το γρήγορο, μετά το παλιό/συμβατό
+    models_to_try = [
+        "models/gemini-1.5-flash", # Το ιδανικό
+        "models/gemini-pro"        # Η σίγουρη λύση για παλιές βιβλιοθήκες
+    ]
+    
+    last_error = ""
+
+    for model_name in models_to_try:
+        try:
+            # print(f"Trying model: {model_name}...") # Debugging
+            model = genai.GenerativeModel(model_name)
+            
+            # Config
+            config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
+            safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
+                      ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+            
+            response = model.generate_content(parts, safety_settings=safety, generation_config=config)
+            return response.text
+            
+        except Exception as e:
+            error_str = str(e)
+            last_error = error_str
+            # Αν είναι 404 (Not Found), σημαίνει ότι η βιβλιοθήκη δεν το ξέρει. Πάμε στο επόμενο.
+            if "404" in error_str or "not found" in error_str.lower():
+                continue
+            # Αν είναι άλλο λάθος (π.χ. Quota), ίσως πρέπει να δοκιμάσουμε το επόμενο ούτως ή άλλως
+            continue
+
+    return f"CRITICAL ERROR: Όλα τα μοντέλα απέτυχαν. Τελευταίο λάθος: {last_error}"
 
 # --- SELF HEALING ---
 
 def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     """Καλεί το AI για διόρθωση."""
     prompt = f"FIX SYNTAX ERROR in '{file_path}':\n{error_msg}\nCODE:\n```python\n{bad_code}\n```\nReturn ONLY code."
-    return generate_with_hardcoded_model("Fix", [prompt], api_key)
+    return generate_with_fallback_logic("Fix", [prompt], api_key)
 
 def apply_changes_from_response(response_text, api_key):
     """Εφαρμογή αλλαγών με Syntax Check & Self-Healing."""
@@ -162,7 +177,7 @@ def apply_changes_from_response(response_text, api_key):
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🏁 Architect AI v30 (FINAL)")
+    st.title("🌐 Architect AI v31 (Universal)")
     
     project_files = get_project_structure()
     file_list = ["None (Global Context)", "architect.py"] + [f for f in project_files.keys() if f != "architect.py"]
@@ -177,7 +192,7 @@ def main():
         st.markdown("---")
         st.subheader("🎙️ & 📸 Inputs")
         
-        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='recorder_v30')
+        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='recorder_v31')
         uploaded_file = st.file_uploader("Upload Image/PDF", type=['png', 'jpg', 'jpeg', 'pdf'], label_visibility="collapsed")
         
         st.markdown("---")
@@ -253,8 +268,8 @@ def main():
         if uploaded_file: parts.append({"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()})
 
         with st.chat_message("assistant"):
-            with st.spinner(f"O Αρχιτέκτονας εργάζεται (Final v30)..."):
-                response_text = generate_with_hardcoded_model(selected_strategy, parts, api_key)
+            with st.spinner(f"O Αρχιτέκτονας δοκιμάζει σύνδεση..."):
+                response_text = generate_with_fallback_logic(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
