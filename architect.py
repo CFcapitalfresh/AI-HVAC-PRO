@@ -8,13 +8,13 @@ from datetime import datetime
 
 try:
     from openai import OpenAI
-    from streamlit_mic_recorder import mic_recorder
+    from audiorecorder import audiorecorder
 except ImportError:
-    st.error("⚠️ Τρέξε: pip install openai streamlit-mic-recorder")
+    st.error("⚠️ Τρέξε: pip install openai streamlit-audiorecorder")
     st.stop()
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ ---
-st.set_page_config(page_title="Mastro Nek v47 (Human Style)", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Mastro Nek v48 (Human Style)", page_icon="🏗️", layout="wide")
 
 def get_project_inventory():
     """Επιστρέφει όλα τα αρχεία του τρέχοντος φακέλου και υποφακέλων"""
@@ -142,7 +142,7 @@ def run_deepseek(prompt, api_key, context):
 
 # --- 3. UI ---
 def main():
-    st.title("🏗️ Μαστρο-Νεκ v47")
+    st.title("🏗️ Μαστρο-Νεκ v48")
     st.subheader("Συνεργάτης Προγραμματισμού (DeepSeek Native)")
 
     inventory = get_project_inventory()
@@ -155,12 +155,26 @@ def main():
         st.divider()
 
         st.header("🎤 Φωνητική Εισαγωγή")
-        audio = mic_recorder(
-            start_prompt="🎤 Ξεκίνα ηχογράφηση",
-            stop_prompt="⏹ Σταμάτημα",
-            key='mic_v47',
-            format="wav"
-        )
+        st.write("Κάνε κλικ στο κουμπί για ηχογράφηση:")
+
+        audio = audiorecorder("⏺️ Εκκίνηση", "⏹️ Διακοπή", key="recorder")
+
+        if len(audio) > 0:
+            # Αποθήκευση του audio σε bytes
+            audio_bytes = audio.export().read()
+            st.audio(audio_bytes, format="audio/wav")
+
+            # Μετατροπή σε κείμενο
+            if api_key and st.button("🔊 Μετατροπή σε κείμενο"):
+                with st.spinner("Μετατρέπω την ομιλία σου..."):
+                    transcribed_text = transcribe_audio(audio_bytes, api_key)
+                    if transcribed_text:
+                        st.success("✅ Μετατράπηκε επιτυχώς!")
+                        st.text_area("Μεταγραφή:", transcribed_text, height=100)
+                        # Αυτόματη προσθήκη στο chat
+                        if 'transcribed_input' not in st.session_state:
+                            st.session_state.transcribed_input = ""
+                        st.session_state.transcribed_input = transcribed_text
 
         st.divider()
 
@@ -215,14 +229,12 @@ def main():
 
     # Επεξεργασία φωνητικής εισόδου
     user_input = ""
-    if audio and api_key:
-        with st.spinner("🔊 Μετατροπή ομιλίας σε κείμενο..."):
-            transcribed_text = transcribe_audio(audio['bytes'], api_key)
-            if transcribed_text:
-                user_input = transcribed_text
-                st.success(f"🎤 Μετατράπηκε: {transcribed_text}")
-            else:
-                st.error("Δεν μπόρεσα να μετατρέψω την ομιλία")
+
+    # Έλεγχος για μεταγραφή από audio
+    if 'transcribed_input' in st.session_state and st.session_state.transcribed_input:
+        user_input = st.session_state.transcribed_input
+        # Καθαρισμός μετά τη χρήση
+        del st.session_state.transcribed_input
 
     # Κείμενη είσοδος
     if not user_input:
