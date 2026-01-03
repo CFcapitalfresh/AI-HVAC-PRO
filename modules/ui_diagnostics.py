@@ -9,6 +9,7 @@ from io import BytesIO
 
 from services.diagnostics_logic import DiagnosticsService # IMPORT THIS
 from core.language_pack import get_text
+from core.config_loader import ConfigLoader # For direct API Key lookup when AIEngine is not yet ready
 
 
 logger = logging.getLogger("Module_Diagnostics_UI") # Αρχικοποίηση Logger
@@ -51,7 +52,9 @@ def render(user):
     # --- ΕΛΕΓΧΟΣ 1: Gemini API Key ---
     st.markdown(f"**{get_text('diag_api_key_check', lang)}**")
     api_key_placeholder = st.empty() # Placeholder για δυναμική ενημέρωση μηνύματος
-    api_key = ai_engine.api_key # Λήψη API key απευθείας από το AIEngine
+    
+    # Attempt to get API key from ConfigLoader directly in case AIEngine failed to init
+    api_key = ConfigLoader.get_gemini_key() 
 
     if api_key:
         mask = api_key[:5] + "..." + api_key[-4:]
@@ -96,74 +99,124 @@ def render(user):
         status_write(pdf_placeholder, get_text('diag_pdf_read_success', lang), "success")
     except Exception as e:
         status_write(pdf_placeholder, get_text('diag_pdf_read_fail', lang).format(error=str(e)), "error")
-        logger.error(f"UI Diagnostics: PDF Engine check failed: {e}", exc_info=True)
+        logger.error(f"UI Diagnostics: pypdf check failed: {e}", exc_info=True)
 
-    # --- ΕΛΕΓΧΟΣ 4: Προσομοίωση Απάντησης AI ---
-    st.markdown(f"**{get_text('diag_simulation_title', lang)}**")
+    # --- ΕΛΕΓΧΟΣ 4: SIMULATION (GENERATION) ---
+    st.markdown(f"**{get_text('diag_ai_test_run', lang)}**")
     sim_placeholder = st.empty()
-    if ai_engine.model:
-        status_write(sim_placeholder, get_text('diag_simulation_prompt', lang), "loading")
+    if api_key and ai_engine.model:
+        status_write(sim_placeholder, get_text('diag_ai_test_query', lang).format(model_name=ai_engine.model.model_name))
         try:
-            # Χρησιμοποιούμε μια απλή ερώτηση για δοκιμή
-            test_response = ai_engine.get_chat_response(content_parts=[{"text": "Hello, are you online?"}], lang=lang)
-            if "offline" in test_response.lower() or ai_engine.last_error: # Check if the AI itself reported offline
-                 status_write(sim_placeholder, get_text('diag_simulation_fail', lang).format(error=ai_engine.last_error or test_response), "error")
+            # Re-use the ai_engine instance
+            response_text = ai_engine.get_chat_response(content_parts=[{"text": "Γράψε τη λέξη 'OK'."}])
+            
+            if response_text and "OK" in response_text: # Check for the expected "OK" or part of it
+                status_write(sim_placeholder, get_text('diag_ai_test_success', lang).format(response=response_text.strip()), "success")
+            elif response_text:
+                status_write(sim_placeholder, get_text('diag_ai_test_empty', lang), "warning")
+                logger.warning(f"UI Diagnostics: AI test run returned non-empty but unexpected response: {response_text[:100]}")
             else:
-                status_write(sim_placeholder, get_text('diag_simulation_success', lang).format(response_start=test_response[:50]), "success")
+                status_write(sim_placeholder, get_text('diag_ai_test_empty', lang), "warning")
+                logger.warning("UI Diagnostics: AI test run returned empty response.")
         except Exception as e:
-            status_write(sim_placeholder, get_text('diag_simulation_fail', lang).format(error=str(e)), "error")
-            logger.error(f"UI Diagnostics: AI response simulation failed: {e}", exc_info=True)
+            error_message = str(e)
+            status_write(sim_placeholder, get_text('diag_ai_critical_error', lang).format(error=error_message), "error")
+            if "429" in error_message:
+                st.error(f"👉 {get_text('diag_ai_quota_error', lang)}")
+            elif "403" in error_message or "API_KEY_INVALID" in error_message:
+                st.error(f"👉 {get_text('diag_ai_key_invalid', lang)}")
+            elif "404" in error_message:
+                 st.error(f"👉 {get_text('diag_ai_model_not_found', lang)}")
+            else:
+                 st.error(f"👉 {get_text('diag_ai_unknown_error', lang)}")
+            logger.error(f"UI Diagnostics: AI test run failed: {e}", exc_info=True)
     else:
-        status_write(sim_placeholder, get_text('diag_simulation_fail', lang).format(error=ai_engine.last_error or 'AI model not initialized'), "error")
-    
-    st.divider()
+        status_write(sim_placeholder, get_text('diag_ai_test_run', lang), "warning")
+        st.info(get_text('diag_api_key_info', lang))
 
-    # --- AI DIAGNOSTIC WIZARD (EXISTING LOGIC) ---
-    st.subheader(get_text('diag_title', lang)) # Re-use the main title for consistency
+    st.markdown("---")
 
-    if "diag_plan" not in st.session_state:
+    # --- WIZARD LOGIC ---
+    if 'diag_plan' not in st.session_state:
         st.session_state.diag_plan = None
-        st.session_state.current_step = 0
+        st.session_state.diag_current_step = 0
+        st.session_state.diag_solved = False
 
-    problem_description = st.text_area(get_text('diag_input_ph', lang), key="diag_input_problem")
+    if st.session_state.diag_solved:
+        st.success(get_text('diag_solved_msg', lang))
+        if st.button(get_text('diag_btn_new', lang)):
+            st.session_state.diag_plan = None
+            st.session_state.diag_current_step = 0
+            st.session_state.diag_solved = False
+            st.rerun()
 
-    if st.button(get_text('diag_btn_create', lang), type="primary", use_container_width=True):
-        if problem_description:
-            with st.spinner(get_text('diag_spinner', lang)):
-                try:
-                    # Use the DiagnosticsService to generate the checklist
-                    st.session_state.diag_plan = diag_service.generate_checklist(problem_description, lang=lang)
-                    st.session_state.current_step = 0
-                except Exception as e:
-                    logger.error(f"Error generating diagnosis plan: {e}", exc_info=True)
-                    st.error(f"{get_text('diag_fail', lang)}: {e}")
-        else:
-            st.warning("Παρακαλώ περιγράψτε το πρόβλημα.")
+    if st.session_state.diag_plan is None and not st.session_state.diag_solved:
+        with st.form("diagnosis_form"):
+            problem_description = st.text_input(get_text('diag_input_ph', lang), key="diag_problem_input")
+            # Optionally add context from chat if available
+            # context_manual = st.session_state.get('chat_context_manual_content', '')
+            submitted = st.form_submit_button(get_text('diag_btn_create', lang))
 
-    if st.session_state.diag_plan and st.session_state.diag_plan.get('steps'):
-        plan = st.session_state.diag_plan['steps']
-        current_step_idx = st.session_state.current_step
+            if submitted and problem_description:
+                with st.spinner(get_text('diag_spinner', lang)):
+                    try:
+                        # Use DiagnosticsService to generate the checklist
+                        # For now, without specific manual context
+                        checklist = diag_service.generate_checklist(
+                            problem_description, 
+                            lang=lang
+                        )
+                        if checklist:
+                            st.session_state.diag_plan = checklist
+                            st.session_state.diag_current_step = 0
+                            st.session_state.diag_solved = False
+                            logger.info(f"Generated diagnosis plan for: {problem_description}")
+                            st.rerun()
+                        else:
+                            st.error(get_text('diag_fail', lang))
+                            logger.error(f"Failed to generate diagnosis plan for: {problem_description}")
+                    except Exception as e:
+                        st.error(f"{get_text('diag_fail', lang)}: {e}")
+                        logger.critical(f"Critical error during diagnosis plan generation: {e}", exc_info=True)
+            elif submitted:
+                st.warning(get_text('diag_input_ph', lang))
 
-        if current_step_idx < len(plan):
-            step = plan[current_step_idx]
-            st.markdown(f"### {get_text('diag_step', lang)} {current_step_idx + 1} {get_text('diag_of', lang)} {len(plan)}")
-            st.markdown(f"**{get_text('diag_action', lang)}** {step.get('action', 'N/A')}")
-            st.markdown(f"**{get_text('diag_question', lang)}** {step.get('question', 'N/A')}")
-            if step.get('tip'):
-                st.info(f"**{get_text('diag_tip', lang)}** {step['tip']}")
+    elif st.session_state.diag_plan and not st.session_state.diag_solved:
+        plan = st.session_state.diag_plan
+        current_step_idx = st.session_state.diag_current_step
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(get_text('diag_yes', lang), use_container_width=True, key=f"diag_yes_{current_step_idx}"):
-                    st.session_state.current_step += 1
+        st.subheader(plan.get('title', get_text('diag_plan_title', lang)))
+
+        if current_step_idx < len(plan['steps']):
+            step = plan['steps'][current_step_idx]
+            st.markdown(f"### {get_text('diag_step', lang)} {current_step_idx + 1} {get_text('diag_of', lang)} {len(plan['steps'])}")
+            
+            with st.container(border=True):
+                st.markdown(f"**{get_text('diag_action', lang)}** {step.get('action', '')}")
+                if step.get('tip'):
+                    st.info(f"💡 {step['tip']}")
+                st.markdown(f"**{get_text('diag_question', lang)}** {step.get('question', '')}")
+
+                col_yes, col_no, col_cancel = st.columns(3)
+                if col_yes.button(get_text('diag_yes', lang), key=f"diag_yes_{current_step_idx}", use_container_width=True):
+                    st.session_state.diag_solved = True
+                    logger.info(f"Diagnosis solved at step {current_step_idx + 1}")
                     st.rerun()
-            with col2:
-                if st.button(get_text('diag_no', lang), use_container_width=True, key=f"diag_no_{current_step_idx}"):
-                    st.session_state.current_step += 1
+                if col_no.button(get_text('diag_no', lang), key=f"diag_no_{current_step_idx}", use_container_width=True):
+                    st.session_state.diag_current_step += 1
+                    logger.info(f"Diagnosis continued to step {current_step_idx + 2}")
+                    st.rerun()
+                if col_cancel.button(get_text('diag_cancel', lang), key=f"diag_cancel_{current_step_idx}", use_container_width=True):
+                    st.session_state.diag_plan = None
+                    st.session_state.diag_current_step = 0
+                    st.session_state.diag_solved = False
+                    logger.info("Diagnosis cancelled.")
                     st.rerun()
         else:
-            st.success(get_text('diag_done', lang))
-            if st.button(get_text('diag_btn_new', lang), use_container_width=True):
+            st.info(get_text('diag_done', lang))
+            st.warning("⚠️ Δεν βρέθηκαν άλλες λύσεις στον οδηγό.")
+            if st.button(get_text('diag_btn_new', lang), key="diag_restart_end"):
                 st.session_state.diag_plan = None
-                st.session_state.current_step = 0
+                st.session_state.diag_current_step = 0
+                st.session_state.diag_solved = False
                 st.rerun()

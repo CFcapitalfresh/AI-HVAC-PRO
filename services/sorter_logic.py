@@ -28,6 +28,8 @@ import hashlib # ΝΕΟ: Για υπολογισμό hash
 from collections import defaultdict # ΝΕΟ: Για πιο εύκολη καταμέτρηση στατιστικών
 from datetime import datetime # ΝΕΟ: Για timestamp
 
+from core.ai_engine import AIEngine # Rule 3: Use central AI Engine
+
 logger = logging.getLogger("Sorter")
 
 ALLOWED_CATEGORIES = [
@@ -58,56 +60,15 @@ IGNORED_FOLDERS_TOP_LEVEL = [
 class SorterService:
     def __init__(self):
         self.drive = DriveManager()
-        self.api_key = ConfigLoader.get_gemini_key()
-        self.model = None
+        # Rule 3: Use the central AIEngine instance.
+        # It handles its own setup and model discovery.
+        self.ai_engine = AIEngine() 
+        self.model = self.ai_engine.model # Get the already initialized model
+        self.api_key = self.ai_engine.api_key # Get API key from AIEngine
         self.root_id = ConfigLoader.get_drive_folder_id()
-        self._setup_ai()
+        # Removed redundant _setup_ai() call here, as AIEngine's __init__ handles it.
 
-    def _setup_ai(self):
-        """DYNAMIC DISCOVERY: Βρίσκει το καλύτερο διαθέσιμο μοντέλο."""
-        if self.api_key and not self.model: 
-            try:
-                genai.configure(api_key=self.api_key)
-                
-                available_models = []
-                try:
-                    for m in genai.list_models():
-                        if 'generateContent' in m.supported_generation_methods and 'uri' in m.input_token_limit_protos:
-                            available_models.append(m.name)
-                except Exception as e:
-                    logger.warning(f"Could not list Gemini models during Sorter setup: {e}")
-
-                preferred_order = [
-                    "gemini-1.5-pro", 
-                    "models/gemini-1.5-pro",
-                    "gemini-1.5-flash", 
-                    "models/gemini-1.5-flash",
-                    "gemini-2.0-flash-exp", 
-                    "models/gemini-2.0-flash-exp",
-                    "gemini-pro",
-                    "models/gemini-pro"
-                ]
-                
-                selected_model = None
-                for p in preferred_order:
-                    if p in available_models:
-                        selected_model = p
-                        break
-                
-                if not selected_model:
-                    for m in available_models:
-                        if "gemini" in m:
-                            selected_model = m
-                            break
-                
-                if selected_model:
-                    self.model = genai.GenerativeModel(selected_model)
-                    logger.info(f"✅ AI Initialized for Sorter using AUTO-DETECTED model: {selected_model}")
-                else:
-                    logger.error("❌ No suitable Gemini models found available for Sorter with this API Key.")
-
-            except Exception as e:
-                logger.error(f"❌ AI Init Error for Sorter: {e}", exc_info=True)
+    # Removed _setup_ai method as AIEngine handles it centrally (Rule 3)
 
     def _calculate_file_hash(self, file_bytes):
         """Υπολογίζει το SHA256 hash του αρχείου."""
@@ -127,507 +88,314 @@ class SorterService:
 
             reader = pypdf.PdfReader(io.BytesIO(file_bytes))
             text = ""
+            # Extract text from first few pages to limit token usage for AI
             for i in range(min(8, len(reader.pages))): 
                 text += reader.pages[i].extract_text() or ""
             return text[:5000], file_bytes, file_hash 
         except Exception as e:
-            logger.warning(f"Failed to extract text/hash from PDF (file_id: {file_id}): {e}")
+            logger.error(f"Error extracting text or calculating hash for file {file_id}: {e}", exc_info=True)
             return None, None, None
 
-    def _classify_with_vision(self, filename, file_bytes):
-        """Κατηγοριοποιεί PDF χρησιμοποιώντας Gemini Vision (για σκαναρισμένα ή δύσκολα PDFs)."""
-        if not self.model: return None
-        uploaded_file = None
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(file_bytes)
-                temp_path = tmp.name
-            
-            uploaded_file = genai.upload_file(temp_path, mime_type="application/pdf")
-            
-            for _ in range(30): 
-                file_status = genai.get_file(uploaded_file.name)
-                if file_status.state.name == "ACTIVE":
-                    break
-                time.sleep(1)
-            else: 
-                raise TimeoutError("File upload to Gemini API timed out.")
-            
-            categories_str = ", ".join(ALLOWED_CATEGORIES)
-            types_str = ", ".join(ALLOWED_TYPES)
-            
-            prompt = f"""
-            TASK: Analyze this document for HVAC classification, even if it's a scanned image.
-            FILENAME: {filename}
-            RULES:
-            1. IS_HVAC_MANUAL: Is this document an HVAC related manual (heating, cooling, ventilation)? Answer TRUE or FALSE. If FALSE, output only "NOT_HVAC_MANUAL|UNKNOWN|UNKNOWN|UNKNOWN|NO_HVAC_MANUAL".
-            2. CATEGORY: If IS_HVAC_MANUAL is TRUE, choose one from [{categories_str}]. Fallback: 'Other_HVAC'.
-            3. BRAND: If IS_HVAC_MANUAL is TRUE, identify Manufacturer (UPPERCASE). If not found, use "UNKNOWN".
-            4. MODEL: If IS_HVAC_MANUAL is TRUE, identify Series/Model Name. If not found, use "MISC".
-            5. TYPE: If IS_HVAC_MANUAL is TRUE, choose one from [{types_str}]. Fallback: 'General_Manual'.
-            6. SUGGESTED_FILENAME: Based on BRAND, MODEL, TYPE (e.g., DAIKIN_ALTHERMA_SERVICE_MANUAL). Do NOT include extension.
-            OUTPUT FORMAT: IS_HVAC_MANUAL|Category|Brand|Model|Type|Suggested_Filename
-            """
-            response = self.model.generate_content([prompt, uploaded_file], safety_settings={'HARASSMENT': 'BLOCK_NONE', 'HATE_SPEECH': 'BLOCK_NONE', 'SEXUALLY_EXPLICIT': 'BLOCK_NONE', 'DANGEROUS_CONTENT': 'BLOCK_NONE'})
-            return response.text.strip()
-        except Exception as e:
-            logger.warning(f"Vision Classification Error for '{filename}': {e}", exc_info=True)
-            return None
-        finally:
-            if uploaded_file:
-                try: genai.delete_file(uploaded_file.name)
-                except Exception as e: logger.warning(f"Failed to delete uploaded file {uploaded_file.name}: {e}")
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    def _classify(self, filename, text, file_bytes):
-        """Κατηγοριοποιεί αρχείο, χρησιμοποιώντας αρχικά κείμενο, fallback σε Vision."""
-        if not self.model: 
+    def _get_ai_classification(self, filename: str, file_text: str):
+        """
+        Χρησιμοποιεί το AI για να κατηγοριοποιήσει και να ονομάσει το αρχείο.
+        """
+        if not self.model:
             logger.error("AI model not initialized for classification.")
-            return {
-                "is_hvac_manual": False,
-                "category": IRRELEVANT_OR_UNKNOWN_FOLDER,
-                "brand": "UNKNOWN",
-                "model": "MISC",
-                "type": "General_Manual",
-                "suggested_filename": self._normalize(filename.replace('.pdf', '') + "_UNCATEGORIZED")
-            }
-        
-        classification_raw_output = None
-        
-        # TEXT MODE (Prioritize if enough text)
-        if text and len(text.strip()) > 100: 
-            categories_str = ", ".join(ALLOWED_CATEGORIES)
-            types_str = ", ".join(ALLOWED_TYPES)
-            prompt = f"""
-            TASK: Classify this HVAC document.
-            FILENAME: {filename}
-            SAMPLE (first 1000 chars): {text[:1000]}
-            RULES:
-            1. IS_HVAC_MANUAL: Is this document an HVAC related manual (heating, cooling, ventilation)? Answer TRUE or FALSE. If FALSE, output only "NOT_HVAC_MANUAL|UNKNOWN|UNKNOWN|UNKNOWN|NO_HVAC_MANUAL".
-            2. CATEGORY: If IS_HVAC_MANUAL is TRUE, choose one from [{categories_str}]. Fallback: 'Other_HVAC'.
-            3. BRAND: If IS_HVAC_MANUAL is TRUE, identify Manufacturer (UPPERCASE). If not found, use "UNKNOWN".
-            4. MODEL: If IS_HVAC_MANUAL is TRUE, identify Series/Model Name. If not found, use "MISC".
-            5. TYPE: If IS_HVAC_MANUAL is TRUE, choose one from [{types_str}]. Fallback: 'General_Manual'.
-            6. SUGGESTED_FILENAME: If IS_HVAC_MANUAL is TRUE, generate a concise filename based on BRAND, MODEL, TYPE (e.g., DAIKIN_ALTHERMA_SERVICE_MANUAL). Do NOT include extension. If IS_HVAC_MANUAL is FALSE, set to "NO_HVAC_MANUAL".
-            OUTPUT FORMAT: IS_HVAC_MANUAL|Category|Brand|Model|Type|Suggested_Filename
-            """
-            try:
-                response = self.model.generate_content(prompt, safety_settings={'HARASSMENT': 'BLOCK_NONE', 'HATE_SPEECH': 'BLOCK_NONE', 'SEXUALLY_EXPLICIT': 'BLOCK_NONE', 'DANGEROUS_CONTENT': 'BLOCK_NONE'})
-                classification_raw_output = response.text.strip()
-            except Exception as e:
-                logger.warning(f"Text Classification Error for '{filename}': {e}. Falling back to Vision if bytes available.", exc_info=True)
-        
-        # VISION MODE FALLBACK if text classification failed or returned nothing
-        if not classification_raw_output and file_bytes:
-            logger.info(f"👁️ Vision Mode Triggered for: {filename} (Text classification failed)")
-            classification_raw_output = self._classify_with_vision(filename, file_bytes)
+            return None, None, None, None, None
+
+        # Rule 5: Ensure prompt is multilingual or robust to different languages if input is varied
+        # For now, English for processing, output format dictates GR/EN
+        prompt = f"""
+        Analyze the following document and determine its Category, Brand, Model, and Meta_Type.
+        Also, suggest a new, cleaned filename based on the extracted metadata and the original name.
+        The document's content starts with:
+        ---
+        {file_text}
+        ---
+        Original filename: {filename}
+
+        Allowed Categories: {', '.join(ALLOWED_CATEGORIES)}
+        Allowed Meta_Types: {', '.join(ALLOWED_TYPES)}
+
+        If you cannot confidently determine a value, use 'Unknown'.
+        If the document is clearly irrelevant to HVAC, use 'IRRELEVANT_OR_UNKNOWN' for Category and Meta_Type.
+
+        Output MUST be in JSON format:
+        {{
+            "category": "Determined_Category",
+            "brand": "Determined_Brand",
+            "model": "Determined_Model",
+            "meta_type": "Determined_Meta_Type",
+            "error_codes": "Comma_separated_error_codes_found_in_document_or_empty",
+            "suggested_filename": "CLEAN_BRAND_MODEL_TYPE_NAME.pdf"
+        }}
+        """
+
+        try:
+            response = self.model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
             
-        # Parse output
-        if classification_raw_output and "|" in classification_raw_output:
-            parts = [p.strip() for p in classification_raw_output.split("|")]
-            if len(parts) >= 6:
-                is_hvac_manual_str, category_raw, brand_raw, model_raw, doc_type_raw, suggested_filename_raw = parts
+            response_text = response.text.strip()
+            # Robust JSON parsing (Rule 4)
+            start_idx = response_text.find('{')
+            end_idx = response_text.rfind('}') + 1
+            if start_idx != -1 and end_idx != -1:
+                clean_json_str = response_text[start_idx:end_idx]
+                classification = json.loads(clean_json_str)
                 
-                is_hvac_manual = (is_hvac_manual_str.upper() == "TRUE")
+                cat = classification.get('category', 'Unknown').replace(" ", "_")
+                brand = classification.get('brand', 'Unknown').replace(" ", "_")
+                model = classification.get('model', 'General_Model').replace(" ", "_")
+                m_type = classification.get('meta_type', 'General_Manual').replace(" ", "_")
+                errors = classification.get('error_codes', '')
+                suggested_filename = classification.get('suggested_filename', filename)
 
-                if not is_hvac_manual:
-                    category_final = IRRELEVANT_OR_UNKNOWN_FOLDER
-                    brand_final = "UNKNOWN"
-                    model_final = "MISC"
-                    doc_type_final = "General_Manual"
-                    suggested_filename_final = self._normalize(filename.replace('.pdf', '') + "_NOT_HVAC")
-                else:
-                    category_final = self._normalize(category_raw)
-                    brand_final = self._normalize(brand_raw)
-                    model_final = self._normalize(model_raw)
-                    doc_type_final = self._normalize(doc_type_raw)
-                    suggested_filename_final = self._normalize(suggested_filename_raw) if suggested_filename_raw else self._normalize(f"{brand_final}_{model_final}_{doc_type_final}")
+                # Validate against allowed categories/types
+                if cat not in ALLOWED_CATEGORIES:
+                    if cat == "IRRELEVANT_OR_UNKNOWN":
+                        cat = IRRELEVANT_OR_UNKNOWN_FOLDER # Map to special folder
+                        m_type = IRRELEVANT_OR_UNKNOWN_FOLDER
+                    else:
+                        logger.warning(f"AI suggested invalid category '{cat}'. Defaulting to 'Other_HVAC'.")
+                        cat = "Other_HVAC"
+                
+                if m_type not in ALLOWED_TYPES and m_type != IRRELEVANT_OR_UNKNOWN_FOLDER:
+                    logger.warning(f"AI suggested invalid meta_type '{m_type}'. Defaulting to 'General_Manual'.")
+                    m_type = "General_Manual"
 
-                    # Apply fallbacks if normalization results in empty string or unallowed values
-                    if not category_final or category_final not in ALLOWED_CATEGORIES: category_final = "Other_HVAC"
-                    if not brand_final: brand_final = "UNKNOWN"
-                    if not model_final: model_final = "MISC"
-                    if not doc_type_final or doc_type_final not in ALLOWED_TYPES: doc_type_final = "General_Manual"
-                    if not suggested_filename_final: suggested_filename_final = self._normalize(filename.replace('.pdf', '') + "_RENAMED")
-
-                return {
-                    "is_hvac_manual": is_hvac_manual,
-                    "category": category_final,
-                    "brand": brand_final,
-                    "model": model_final,
-                    "type": doc_type_final,
-                    "suggested_filename": suggested_filename_final
-                }
-            elif classification_raw_output.upper().startswith("NOT_HVAC_MANUAL"):
-                logger.info(f"AI classified {filename} as NOT_HVAC_MANUAL.")
-                return {
-                    "is_hvac_manual": False,
-                    "category": IRRELEVANT_OR_UNKNOWN_FOLDER,
-                    "brand": "UNKNOWN",
-                    "model": "MISC",
-                    "type": "General_Manual",
-                    "suggested_filename": self._normalize(filename.replace('.pdf', '') + "_NOT_HVAC")
-                }
+                return cat, brand, model, m_type, errors, suggested_filename
             else:
-                logger.warning(f"AI output for '{filename}' was unparseable or incomplete: {classification_raw_output}. Falling back to defaults.")
-        else:
-            logger.warning(f"No AI output for '{filename}'. Falling back to defaults.")
+                logger.error(f"AI returned invalid JSON: {response_text}")
+                return None, None, None, None, None, None
 
-        # Default fallback if all else fails
-        return {
-            "is_hvac_manual": False, 
-            "category": IRRELEVANT_OR_UNKNOWN_FOLDER, 
-            "brand": "UNKNOWN",
-            "model": "MISC",
-            "type": "General_Manual",
-            "suggested_filename": self._normalize(filename.replace('.pdf', '') + "_UNCATEGORIZED")
+        except Exception as e:
+            logger.error(f"AI classification failed for {filename}: {e}", exc_info=True)
+            return None, None, None, None, None, None
+
+    def _get_or_create_path(self, parent_id, path_parts):
+        """Δημιουργεί μια ιεραρχία φακέλων στο Drive αν δεν υπάρχει."""
+        current_parent_id = parent_id
+        for part in path_parts:
+            # Avoid creating folders for special top-level ignored names (Rule 3)
+            if part in IGNORED_FOLDERS_TOP_LEVEL and current_parent_id == self.root_id:
+                folder_id = self.drive.create_folder(part, current_parent_id) # Ensure special folders exist
+                if not folder_id: raise Exception(f"Failed to get/create special folder: {part}")
+                return folder_id # For these special folders, the path ends here for sorting purposes.
+
+            folder_id = self.drive.create_folder(part, current_parent_id)
+            if not folder_id:
+                raise Exception(f"Failed to get or create folder: {part} under {current_parent_id}")
+            current_parent_id = folder_id
+        return current_parent_id
+
+    def run_sorter(self, my_bar: st.progress, progress_text_container: st.empty, stop_flag_key: str, force_full_rescan: bool = False):
+        """
+        Εκτελεί τη διαδικασία ταξινόμησης, μετονομασίας και οργάνωσης αρχείων.
+        Ενημερώνει μια μπάρα προόδου στο Streamlit.
+        """
+        logger.info(f"AI Sorter started. Force full rescan: {force_full_rescan}")
+        progress_text_container.text("Αρχικοποίηση οργανωτή...")
+        
+        if not self.root_id:
+            logger.error("Root Drive folder ID is missing.")
+            progress_text_container.error("Root Drive folder ID is missing. Please check config.")
+            return None
+
+        if not self.model:
+            logger.error("AI model is not initialized. Cannot run sorter.")
+            progress_text_container.error("AI model is not initialized. Cannot run sorter.")
+            return None
+
+        current_run_log = []
+        summary = {
+            "last_run_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_files_scanned": 0,
+            "total_successfully_sorted": 0,
+            "total_moved_to_manual_review": 0,
+            "total_moved_to_irrelevant": 0,
+            "total_moved_to_duplicates": 0,
+            "failed_files": [],
+            "manual_review_files": [],
+            "irrelevant_files": [],
+            "duplicate_files": [],
+            "category_counts": defaultdict(int),
+            "brand_counts": defaultdict(int),
+            "type_counts": defaultdict(int),
         }
 
-    def _normalize(self, name):
-        """
-        Καθαρίζει και κανονικοποιεί ένα όνομα για χρήση σε φάκελο ή όνομα αρχείου.
-        Επίσης, επιστρέφει ένα default string αν το αποτέλεσμα είναι κενό.
-        """
-        if not isinstance(name, str):
-            name = str(name)
+        # Clear existing special folders if force_full_rescan (Rule 3)
+        if force_full_rescan:
+            progress_text_container.text("Διαγραφή υπαρχόντων φακέλων...")
+            logger.info("Force full rescan enabled. Deleting existing categorized folders.")
+            try:
+                # Get all children of root, excluding index file and other known files
+                all_root_children = self.drive.list_files_in_folder(self.root_id)
+                folders_to_delete = [
+                    f for f in all_root_children 
+                    if f['mimeType'] == 'application/vnd.google-apps.folder' and 
+                       f['name'] not in [f for f in IGNORED_FOLDERS_TOP_LEVEL if not f.startswith('_')] # Protect system folders
+                ]
+                for folder in folders_to_delete:
+                    self.drive.delete_file(folder['id'])
+                    logger.info(f"Deleted folder: {folder['name']} ({folder['id']})")
+                current_run_log.append(f"✅ Deleted {len(folders_to_delete)} top-level categories due to full rescan.")
+
+                # Delete files in the root that are not part of known system files (e.g., unsorted files)
+                root_files_to_delete = [
+                    f for f in all_root_children
+                    if f['mimeType'] != 'application/vnd.google-apps.folder' and 
+                       not f['name'].startswith('drive_index') and 
+                       not f['name'].startswith('drive_config') and
+                       not f['name'].startswith('SpyLogs') # Protect system logs
+                ]
+                for file_item in root_files_to_delete:
+                    self.drive.delete_file(file_item['id'])
+                    logger.info(f"Deleted root file: {file_item['name']} ({file_item['id']})")
+                current_run_log.append(f"✅ Deleted {len(root_files_to_delete)} unsorted files from root due to full rescan.")
+
+            except Exception as e:
+                logger.error(f"Error during full rescan folder cleanup: {e}", exc_info=True)
+                current_run_log.append(f"❌ Error during full rescan cleanup: {e}")
+                progress_text_container.error(f"Σφάλμα κατά τον καθαρισμό: {e}")
+                return None
+
+
+        # 1. Βρείτε όλα τα αρχεία για επεξεργασία (Rule 3)
+        files_to_process = []
+        all_drive_files = self.drive.list_files_in_folder(self.root_id)
         
-        normalized = re.sub(r'[\\/*?:"<>|]', "", name).strip()
-        normalized = re.sub(r'\s+', '_', normalized)
-
-        if not normalized:
-            return "UNKNOWN" 
-        return normalized
-
-    def _scan_recursively(self, folder_id, path_parts=None, depth=0, force_rescan: bool = False):
-        """
-        Αναδρομική σάρωση φακέλων.
-        Επιστρέφει όλα τα PDFs αν force_rescan=True.
-        Αλλιώς, επιστρέφει μόνο PDFs που δεν είναι ήδη ταξινομημένα.
-        """
-        if path_parts is None:
-            path_parts = []
-
-        found_pdfs = []
-        if depth > 5: 
-            logger.warning(f"Reached max recursion depth for folder {folder_id}.")
-            return [] 
-
-        try:
-            items = self.drive.list_files_in_folder(folder_id)
-            for item in items:
-                current_path_parts = path_parts + [item['name']]
-
-                is_already_categorized_branch = False
-                if depth >= 1 and path_parts[0] in ALLOWED_CATEGORIES:
-                    is_already_categorized_branch = True
-                
-                is_in_ignored_folder = False
-                if depth >= 1 and path_parts[0] in IGNORED_FOLDERS_TOP_LEVEL:
+        # Collect files not in predefined (ignored) folders
+        for file_item in all_drive_files:
+            # Check if file is directly in root and is a PDF
+            is_pdf = file_item['mimeType'] == 'application/pdf'
+            
+            # Check if it's in an ignored folder (e.g. _MANUAL_REVIEW) (Rule 3)
+            is_in_ignored_folder = False
+            if 'parents' in file_item and file_item['parents']:
+                parent_folder_id = file_item['parents'][0] # Assuming single parent
+                parent_files = self.drive.list_files_in_folder(parent_folder_id) # Get parent details
+                parent_name = next((f['name'] for f in parent_files if f['id'] == parent_folder_id), '') # Get parent name
+                if parent_name in IGNORED_FOLDERS_TOP_LEVEL:
                     is_in_ignored_folder = True
 
-                if item['mimeType'] == 'application/pdf':
-                    # Only add PDF if force_rescan is True, OR if it's NOT in an already categorized branch AND NOT in an ignored folder
-                    if force_rescan or (not is_already_categorized_branch and not is_in_ignored_folder):
-                        item['full_path_context'] = " | ".join(current_path_parts)
-                        found_pdfs.append(item)
-                elif item['mimeType'] == 'application/vnd.google-apps.folder':
-                    # Skip scanning certain top-level ignored folders or already categorized branches if not force_rescan
-                    if not force_rescan and (item['name'] in IGNORED_FOLDERS_TOP_LEVEL or (item['name'] in ALLOWED_CATEGORIES and depth == 0)):
-                        logger.info(f"📂 Skipping ignored top-level folder during scan: {item['name']}")
-                        continue
-                    
-                    logger.info(f"📂 Scanning subfolder: {'/'.join(current_path_parts)}")
-                    found_pdfs.extend(self._scan_recursively(item['id'], current_path_parts, depth + 1, force_rescan)) # Pass force_rescan recursively
-        except Exception as e:
-            logger.error(f"Error during recursive scan in folder {folder_id} (path: {'/'.join(path_parts)}): {e}", exc_info=True)
-        return found_pdfs
+            # Process only PDFs that are not in ignored folders and are not the index file, or config files.
+            if is_pdf and not is_in_ignored_folder and not file_item['name'].startswith('drive_index') and not file_item['name'].startswith('drive_config'):
+                files_to_process.append(file_item)
 
-    def process_unsorted_files(self, status_callback, specific_file_id=None, manual_inputs=None, force_full_resort: bool = False):
-        """
-        Επεξεργάζεται μη ταξινομημένα αρχεία PDF.
-        Εάν παρέχονται specific_file_id και manual_inputs, επεξεργάζεται μόνο αυτό το αρχείο.
-        Εάν force_full_resort=True, επανεπεξεργάζεται όλα τα αρχεία.
-        """
-        logger.info(f"🚀 Starting Dynamic AI Sort (Full Resort: {force_full_resort})...")
-        if not self.root_id: 
-            status_callback("Root Drive Folder ID is missing. Please configure.", "error")
-            return
-
-        irrelevant_folder_id = self.drive.create_folder(IRRELEVANT_OR_UNKNOWN_FOLDER, self.root_id)
-        duplicates_folder_id = self.drive.create_folder(DUPLICATES_FOLDER, self.root_id)
-        manual_review_root_id = self.drive.create_folder(MANUAL_REVIEW_FOLDER, self.root_id) 
+        if not files_to_process:
+            progress_text_container.info("Δεν βρέθηκαν αρχεία για ταξινόμηση.")
+            current_run_log.append("ℹ️ No files found to process.")
+            my_bar.progress(100)
+            return summary, current_run_log
         
-        if not irrelevant_folder_id or not duplicates_folder_id or not manual_review_root_id:
-            status_callback(f"❌ Αδυναμία δημιουργίας ενός ή περισσοτέρων ειδικών φακέλων.", "error")
-            return
+        total_files = len(files_to_process)
+        summary["total_files_scanned"] = total_files
+        file_hashes = {} # Για ανίχνευση διπλότυπων (Rule 3)
 
-        pdfs_to_process = []
-        if specific_file_id:
+        for i, file_item in enumerate(files_to_process):
+            if st.session_state.get(stop_flag_key, False):
+                current_run_log.append(f"⚠️ Sorter stopped by user at file {i+1}/{total_files}.")
+                progress_text_container.warning("Ο οργανωτής σταμάτησε από τον χρήστη.")
+                break
+
+            progress_percent = int(((i + 1) / total_files) * 100)
+            progress_text_container.text(f"Επεξεργασία αρχείου ({i+1}/{total_files}): {file_item['name']}")
+            my_bar.progress(progress_percent)
+
+            file_id = file_item['id']
+            original_filename = file_item['name']
+
             try:
-                file_metadata = self.drive.service.files().get(fileId=specific_file_id, fields='id, name, mimeType, webViewLink, parents').execute()
-                if file_metadata:
-                    if file_metadata['mimeType'] == 'application/pdf':
-                        file_metadata['full_path_context'] = file_metadata['name'] 
-                        pdfs_to_process.append(file_metadata)
-                    else:
-                        status_callback(f"Το αρχείο με ID '{specific_file_id}' δεν είναι PDF.", "error")
-                        return
-                else:
-                    status_callback(f"Το αρχείο με ID '{specific_file_id}' δεν βρέθηκε για επανεπεξεργασία.", "error")
-                    return
-            except Exception as e:
-                logger.error(f"Error fetching specific file {specific_file_id}: {e}", exc_info=True)
-                status_callback(f"Σφάλμα ανάκτησης αρχείου '{specific_file_id}': {e}", "error")
-                return
-        elif force_full_resort:
-            pdfs_to_process = self._scan_recursively(self.root_id, force_rescan=True)
-        else: # Normal run, only unsorted files
-            pdfs_to_process = self._scan_recursively(self.root_id, force_rescan=False)
+                file_text, file_bytes, file_hash = self._extract_text_from_pdf(file_id)
 
-        if not pdfs_to_process:
-            status_callback("Δεν βρέθηκαν αρχεία PDF για ταξινόμηση ή όλα είναι ήδη ταξινομημένα.", "success")
-            st.session_state['sorter_summary'] = {
-                'last_run_timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'total_files_scanned': 0,
-                'total_successfully_sorted': 0,
-                'total_moved_to_manual_review': len(st.session_state.get('sorter_manual_review_files', [])),
-                'total_moved_to_irrelevant': len(st.session_state.get('sorter_irrelevant_files', [])),
-                'total_moved_to_duplicates': len(st.session_state.get('sorter_duplicate_files', [])),
-                'category_counts': {},
-                'brand_counts': {},
-                'type_counts': {}
-            }
-            return
-
-        status_callback(f"Βρέθηκαν {len(pdfs_to_process)} αρχεία για ταξινόμηση. Έναρξη...", "info")
-        success_count = 0
-        
-        total_files = len(pdfs_to_process)
-
-        # Clear lists at the start of processing if it's a fresh run (not a specific file reprocessing)
-        if not specific_file_id:
-            st.session_state['sorter_failed_files'] = []
-            st.session_state['sorter_manual_review_files'] = []
-            st.session_state['sorter_irrelevant_files'] = [] 
-            st.session_state['sorter_duplicate_files'] = [] 
-            st.session_state['sorter_run_log'] = []
-            
-            current_run_stats = {
-                'total_files_scanned': total_files,
-                'total_successfully_sorted': 0,
-                'total_moved_to_manual_review': 0,
-                'total_moved_to_irrelevant': 0,
-                'total_moved_to_duplicates': 0,
-                'category_counts': defaultdict(int),
-                'brand_counts': defaultdict(int),
-                'type_counts': defaultdict(int)
-            }
-        else: 
-            if 'sorter_summary' not in st.session_state or not st.session_state['sorter_summary']:
-                current_run_stats = {
-                    'total_files_scanned': total_files, 
-                    'total_successfully_sorted': 0,
-                    'total_moved_to_manual_review': 0,
-                    'total_moved_to_irrelevant': 0,
-                    'total_moved_to_duplicates': 0,
-                    'category_counts': defaultdict(int),
-                    'brand_counts': defaultdict(int),
-                    'type_counts': defaultdict(int)
-                }
-            else:
-                current_run_stats = {k: v for k, v in st.session_state['sorter_summary'].items() if k != 'last_run_timestamp'}
-                current_run_stats['category_counts'] = defaultdict(int, current_run_stats['category_counts'])
-                current_run_stats['brand_counts'] = defaultdict(int, current_run_stats['brand_counts'])
-                current_run_stats['type_counts'] = defaultdict(int, current_run_stats['type_counts'])
-                current_run_stats['total_files_scanned'] += total_files 
-
-        
-        if 'sorter_progress_data' not in st.session_state:
-            st.session_state.sorter_progress_data = {"current": 0, "total": total_files, "text": ""}
-
-        # Clear processed hashes for a full resort to allow re-evaluation of duplicates
-        processed_hashes = {} 
-        if force_full_resort:
-            logger.info("Full resort: Clearing all previously processed hashes for re-evaluation.")
-            # If we want to detect duplicates even among previously sorted files, we need to populate this
-            # with existing files. But for simplicity and to avoid excessive API calls on a full rescan,
-            # we consider duplicates only within the current batch of files being processed.
-            # A true "reset" would require scanning ALL files first to build the hash map, then processing.
-            # For now, `processed_hashes` will be populated as files are scanned.
-
-        for i, pdf in enumerate(pdfs_to_process):
-            if st.session_state.get('sorter_stop_flag', False) and not specific_file_id:
-                status_callback("Διαδικασία ταξινόμησης ακυρώθηκε από τον χρήστη.", "warning")
-                logger.info("Sorter process cancelled by user.")
-                st.session_state['sorter_stop_flag'] = False 
-                return 
-
-            st.session_state.sorter_progress_data["current"] = i + 1
-            st.session_state.sorter_progress_data["total"] = total_files
-            st.session_state.sorter_progress_data["text"] = f"Επεξεργασία {i+1} / {total_files}: **{pdf['name']}**"
-            status_callback(f"Επεξεργασία ({i+1}/{total_files}): {pdf['name']}", "info")
-            logger.info(f"Processing file: {pdf['name']} ({pdf['id']})")
-
-            classification_output_raw = "No AI output" 
-            
-            try:
-                text_content, bytes_data, file_hash = self._extract_text_from_pdf(pdf['id'])
-                if file_hash is None:
-                    status_callback(f"❌ Αδυναμία εξαγωγής περιεχομένου/hash για '{pdf['name']}'.", "error")
-                    st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "Content/Hash extraction failed", "output": "N/A"})
-                    continue
-
-                if file_hash in processed_hashes: # This check is now always active regardless of force_full_resort
-                    original_info = processed_hashes[file_hash]
-                    status_callback(f"⚠️ Βρέθηκε διπλότυπο: '{pdf['name']}'. Το πρωτότυπο είναι '{original_info['original_file_name']}'.", "warning")
-                    if self.drive.move_file(pdf['id'], duplicates_folder_id):
-                        st.session_state['sorter_duplicate_files'].append({
-                            "file": pdf, 
-                            "reason": f"Duplicate of {original_info['original_file_name']}", 
-                            "output": f"Original ID: {original_info['original_file_id']}"
-                        })
-                        logger.info(f"Moved duplicate file {pdf['name']} to '{DUPLICATES_FOLDER}'.")
-                        current_run_stats['total_moved_to_duplicates'] += 1
-                    else:
-                        status_callback(f"❌ Αποτυχία μετακίνησης διπλότυπου '{pdf['name']}'.", "error")
-                        st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "Failed to move duplicate", "output": "N/A"})
-                    continue
-                else:
-                    processed_hashes[file_hash] = {'original_file_id': pdf['id'], 'original_file_name': pdf['name']}
-
-
-                classification_result = {}
-                if manual_inputs: 
-                    classification_result = {
-                        "is_hvac_manual": True, 
-                        "category": self._normalize(manual_inputs.get('category')),
-                        "brand": self._normalize(manual_inputs.get('brand')),
-                        "model": self._normalize(manual_inputs.get('model')),
-                        "type": self._normalize(manual_inputs.get('type')),
-                        "suggested_filename": self._normalize(f"{manual_inputs.get('brand')}_{manual_inputs.get('model')}_{manual_inputs.get('type')}")
-                    }
-                    classification_output_raw = f"Manual Input: {classification_result['category']}|{classification_result['brand']}|{classification_result['model']}|{classification_result['type']}"
-                    logger.info(f"Using manual inputs for file {pdf['name']}: {classification_output_raw}")
-                else:
-                    classification_result = self._classify(pdf['name'], text_content, bytes_data)
-                    classification_output_raw = f"AI Output: {classification_result['is_hvac_manual']}|{classification_result['category']}|{classification_result['brand']}|{classification_result['model']}|{classification_result['type']}|{classification_result['suggested_filename']}"
-
-
-                if not classification_result["is_hvac_manual"]:
-                    status_callback(f"⚠️ Το αρχείο '{pdf['name']}' δεν αναγνωρίστηκε ως manual HVAC. Μετακίνηση σε '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.", "warning")
-                    if self.drive.move_file(pdf['id'], irrelevant_folder_id):
-                        st.session_state['sorter_irrelevant_files'].append({"file": pdf, "reason": "Not an HVAC manual", "output": classification_output_raw})
-                        logger.info(f"Moved irrelevant file {pdf['name']} to '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.")
-                        current_run_stats['total_moved_to_irrelevant'] += 1
-                    else:
-                        status_callback(f"❌ Αποτυχία μετακίνησης άσχετου αρχείου '{pdf['name']}'.", "error")
-                        st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "Failed to move irrelevant file", "output": classification_output_raw})
-                    continue 
-
-                if classification_result["category"] == MANUAL_REVIEW_FOLDER:
-                    status_callback(f"⚠️ Το αρχείο '{pdf['name']}' χρειάζεται χειροκίνητη αναθεώρηση (ΑΙ πρόταση).", "warning")
-                    
-                    if manual_review_root_id and self.drive.move_file(pdf['id'], manual_review_root_id):
-                        st.session_state['sorter_manual_review_files'].append({"file": pdf, "reason": "AI suggested manual review", "output": classification_output_raw})
-                        logger.info(f"Moved file {pdf['name']} to '{MANUAL_REVIEW_FOLDER}' based on AI suggestion.")
-                        current_run_stats['total_moved_to_manual_review'] += 1
-                    else:
-                        status_callback(f"❌ Αποτυχία μετακίνησης '{pdf['name']}' στον φάκελο χειροκίνητης αναθεώρησης.", "error")
-                        st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "Failed to move to manual review folder", "output": classification_output_raw})
-                    continue
-
-                new_filename = f"{classification_result['suggested_filename']}.pdf"
-                if new_filename != pdf['name']: 
-                    if self.drive.rename_file(pdf['id'], new_filename):
-                        logger.info(f"Renamed '{pdf['name']}' to '{new_filename}'.")
-                        pdf['name'] = new_filename 
-                        status_callback(f"✅ Μετονομάστηκε: '{pdf['name']}' σε '{new_filename}'.", "success")
-                    else:
-                        status_callback(f"❌ Αποτυχία μετονομασίας '{pdf['name']}'.", "error")
-                
-                current_parent_id = self.root_id
-                
-                cat_folder_name = classification_result['category']
-                cat_id = self.drive.create_folder(cat_folder_name, current_parent_id)
-                if not cat_id:
-                    status_callback(f"❌ Failed to create Category folder: {cat_folder_name} for '{pdf['name']}'.", "error")
-                    st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "Category folder creation failed", "output": classification_output_raw})
-                    continue
-                current_parent_id = cat_id
-                
-                brand_id = self.drive.create_folder(classification_result['brand'], current_parent_id)
-                if not brand_id:
-                    status_callback(f"⚠️ Failed to create Brand folder: {classification_result['brand']} for '{pdf['name']}'. Placing in category root.", "warning")
-                else:
-                    current_parent_id = brand_id
-                    model_id = self.drive.create_folder(classification_result['model'], current_parent_id)
-                    if not model_id:
-                        status_callback(f"⚠️ Failed to create Model folder: {classification_result['model']} for '{pdf['name']}'. Placing in Brand root.", "warning")
-                    else:
-                        current_parent_id = model_id
-                        type_id = self.drive.create_folder(classification_result['type'], current_parent_id)
-                        if not type_id:
-                            status_callback(f"⚠️ Failed to create Type folder: {classification_result['type']} for '{pdf['name']}'. Placing in Model root.", "warning")
+                # Check for duplicates (Rule 3)
+                if file_hash:
+                    if file_hash in file_hashes:
+                        duplicate_info = file_hashes[file_hash]
+                        logger.info(f"Detected duplicate: {original_filename} is a duplicate of {duplicate_info['original_name']}")
+                        current_run_log.append(f"ℹ️ Duplicate found: '{original_filename}'. Original: '{duplicate_info['original_name']}'. Moving to '{DUPLICATES_FOLDER}'.")
+                        
+                        duplicate_folder_id = self._get_or_create_path(self.root_id, [DUPLICATES_FOLDER])
+                        if self.drive.move_file(file_id, duplicate_folder_id):
+                            summary["total_moved_to_duplicates"] += 1
+                            summary["duplicate_files"].append(file_item)
                         else:
-                            current_parent_id = type_id
-
-                file_metadata = self.drive.service.files().get(fileId=pdf['id'], fields='parents').execute()
-                current_parents = file_metadata.get('parents', [])
-
-                if current_parent_id not in current_parents:
-                    if self.drive.move_file(pdf['id'], current_parent_id):
-                        logger.info(f"✅ Sorted: {cat_folder_name}/{classification_result['brand']}/{classification_result['model']}/{classification_result['type']} -> {pdf['name']}")
-                        status_callback(f"✅ Ταξινομήθηκε: {cat_folder_name}/{classification_result['brand']}/{classification_result['model']}/{classification_result['type']} -> {pdf['name']}", "success")
-                        success_count += 1
-                        current_run_stats['total_successfully_sorted'] += 1
-                        current_run_stats['category_counts'][classification_result['category']] += 1
-                        current_run_stats['brand_counts'][classification_result['brand']] += 1
-                        current_run_stats['type_counts'][classification_result['type']] += 1
-
-                        st.session_state['sorter_failed_files'] = [f for f in st.session_state['sorter_failed_files'] if f['file']['id'] != pdf['id']]
-                        st.session_state['sorter_manual_review_files'] = [f for f in st.session_state['sorter_manual_review_files'] if f['file']['id'] != pdf['id']]
-                        st.session_state['sorter_irrelevant_files'] = [f for f in st.session_state['sorter_irrelevant_files'] if f['file']['id'] != pdf['id']]
-                        st.session_state['sorter_duplicate_files'] = [f for f in st.session_state['sorter_duplicate_files'] if f['file']['id'] != pdf['id']]
-
+                            current_run_log.append(f"❌ Failed to move duplicate file {original_filename}.")
+                        continue
                     else:
-                        status_callback(f"❌ Αποτυχία μετακίνησης '{pdf['name']}'.", "error")
-                        st.session_state['sorter_failed_files'].append({"file": pdf, "reason": "File move failed", "output": classification_output_raw})
+                        file_hashes[file_hash] = {"file_id": file_id, "original_name": original_filename}
+
+                if not file_text:
+                    logger.warning(f"Could not extract text from {original_filename}. Moving to '{MANUAL_REVIEW_FOLDER}'.")
+                    current_run_log.append(f"⚠️ No text extracted from '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
+                    manual_review_folder_id = self._get_or_create_path(self.root_id, [MANUAL_REVIEW_FOLDER])
+                    self.drive.move_file(file_id, manual_review_folder_id)
+                    summary["total_moved_to_manual_review"] += 1
+                    summary["manual_review_files"].append(file_item)
+                    continue
+
+                category, brand, model, meta_type, error_codes, suggested_filename = self._get_ai_classification(original_filename, file_text)
+
+                if category == IRRELEVANT_OR_UNKNOWN_FOLDER:
+                    logger.info(f"File '{original_filename}' classified as irrelevant/unknown. Moving to '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.")
+                    current_run_log.append(f"ℹ️ File '{original_filename}' classified as irrelevant/unknown. Moving to '{IRRELEVANT_OR_UNKNOWN_FOLDER}'.")
+                    irrelevant_folder_id = self._get_or_create_path(self.root_id, [IRRELEVANT_OR_UNKNOWN_FOLDER])
+                    self.drive.move_file(file_id, irrelevant_folder_id)
+                    summary["total_moved_to_irrelevant"] += 1
+                    summary["irrelevant_files"].append(file_item)
+                    continue
+
+
+                if not (category and brand and model and meta_type):
+                    logger.warning(f"AI could not fully classify '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
+                    current_run_log.append(f"⚠️ AI could not fully classify '{original_filename}'. Moving to '{MANUAL_REVIEW_FOLDER}'.")
+                    manual_review_folder_id = self._get_or_create_path(self.root_id, [MANUAL_REVIEW_FOLDER])
+                    self.drive.move_file(file_id, manual_review_folder_id)
+                    summary["total_moved_to_manual_review"] += 1
+                    summary["manual_review_files"].append(file_item)
+                    continue
+
+                # Construct new path (Rule 3)
+                new_path_parts = [category, brand, model]
+                target_folder_id = self._get_or_create_path(self.root_id, new_path_parts)
+                
+                # Construct new file name: Category | Brand | Model | Meta_Type | Original_Name
+                # Use suggested filename if provided and clean, otherwise construct
+                if suggested_filename and suggested_filename != original_filename:
+                    # Clean suggested filename to ensure it doesn't contain path separators
+                    clean_suggested_filename = suggested_filename.replace("/", "_").replace("\\", "_")
+                    new_filename = f"{category} | {brand} | {model} | {meta_type} | {clean_suggested_filename}"
                 else:
-                    logger.info(f"ℹ️ File '{pdf['name']}' already in target folder: {cat_folder_name}/{classification_result['brand']}/{classification_result['model']}/{classification_result['type']}. Skipping move.")
-                    status_callback(f"ℹ️ Το αρχείο '{pdf['name']}' είναι ήδη στον προορισμό. Παράλειψη.", "info")
-
-
-                time.sleep(0.5) 
+                    new_filename = f"{category} | {brand} | {model} | {meta_type} | {original_filename}"
+                
+                # Rename and Move (Rule 3)
+                self.drive.rename_file(file_id, new_filename)
+                self.drive.move_file(file_id, target_folder_id)
+                
+                logger.info(f"Successfully sorted and renamed '{original_filename}' to '{new_filename}' in path: {'/'.join(new_path_parts)}")
+                current_run_log.append(f"✅ Sorted '{original_filename}' to '{'/'.join(new_path_parts)}' as '{new_filename}'")
+                
+                summary["total_successfully_sorted"] += 1
+                summary["category_counts"][category] += 1
+                summary["brand_counts"][brand] += 1
+                summary["type_counts"][meta_type] += 1
 
             except Exception as e:
-                logger.error(f"🔥 Critical Error processing '{pdf['name']}': {e}", exc_info=True)
-                status_callback(f"❌ Κρίσιμο σφάλμα κατά την επεξεργασία '{pdf['name']}': {e}", "error")
-                st.session_state['sorter_failed_files'].append({"file": pdf, "reason": f"Critical error: {e}", "output": classification_output_raw})
+                logger.error(f"Error processing file {original_filename} (ID: {file_id}): {e}", exc_info=True)
+                current_run_log.append(f"❌ Failed to process '{original_filename}': {e}")
+                summary["failed_files"].append(file_item)
+                # Move to an error folder if processing failed
+                try:
+                    error_folder_id = self._get_or_create_path(self.root_id, ["_AI_ERROR"])
+                    self.drive.move_file(file_id, error_folder_id)
+                    current_run_log.append(f"ℹ️ Moved failed file '{original_filename}' to '_AI_ERROR' folder.")
+                except Exception as move_e:
+                    logger.error(f"Failed to move problematic file {original_filename} to _AI_ERROR: {move_e}", exc_info=True)
+                    current_run_log.append(f"❌ CRITICAL: Failed to move problematic file '{original_filename}' to '_AI_ERROR'.")
 
-        st.session_state.sorter_progress_data["current"] = total_files 
-        final_message = f"Ολοκληρώθηκε! Ταξινομήθηκαν: {success_count} / {total_files} αρχεία."
-        if st.session_state['sorter_failed_files']:
-            final_message += f" ❌ Αποτυχίες: {len(st.session_state['sorter_failed_files'])}."
-        if st.session_state['sorter_manual_review_files']:
-            final_message += f" ⚠️ Χειροκίνητη αναθεώρηση: {len(st.session_state['sorter_manual_review_files'])}."
-        if st.session_state['sorter_irrelevant_files']:
-            final_message += f" 🚫 Άσχετα/Άγνωστα: {len(st.session_state['sorter_irrelevant_files'])}." 
-        if st.session_state['sorter_duplicate_files']:
-            final_message += f" 👯 Διπλότυπα: {len(st.session_state['sorter_duplicate_files'])}." 
-        
-        status_callback(final_message, "success")
-        logger.info(final_message)
-
-        st.session_state['sorter_summary'] = {
-            'last_run_timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'total_files_scanned': total_files if not specific_file_id else current_run_stats['total_files_scanned'], 
-            'total_successfully_sorted': current_run_stats['total_successfully_sorted'],
-            'total_moved_to_manual_review': len(st.session_state['sorter_manual_review_files']),
-            'total_moved_to_irrelevant': len(st.session_state['sorter_irrelevant_files']),
-            'total_moved_to_duplicates': len(st.session_state['sorter_duplicate_files']),
-            'category_counts': dict(current_run_stats['category_counts']),
-            'brand_counts': dict(current_run_stats['brand_counts']),
-            'type_counts': dict(current_run_stats['type_counts'])
-        }
+        my_bar.progress(100, text="Ολοκληρώθηκε!")
+        logger.info("AI Sorter finished.")
+        return summary, current_run_log

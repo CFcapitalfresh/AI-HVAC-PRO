@@ -10,7 +10,7 @@ Centralizes all text strings for multilingual support.
 # The value is another dictionary with 'gr' and 'en' translations.
 LANGUAGE_PACK = {
     # --- General App ---
-    "app_title": {"gr": "Mastro Nek AI | Platinum", "en": "Mastro Nek AI | Platinum"}, # Kept "Platinum" from existing core
+    "app_title": {"gr": "Mastro Nek AI | Platinum", "en": "Mastro Nek AI | Platinum"},
     "login_tab": {"gr": "Σύνδεση", "en": "Login"},
     "register_tab": {"gr": "Εγγραφή", "en": "Register"},
     "email_lbl": {"gr": "Email", "en": "Email"},
@@ -19,11 +19,15 @@ LANGUAGE_PACK = {
     "name_lbl": {"gr": "Όνομα", "en": "Name"},
     "btn_register": {"gr": "Εγγραφή", "en": "Register"},
     "reg_success": {"gr": "Η εγγραφή ολοκληρώθηκε! Περιμένετε την έγκριση.", "en": "Registration successful! Awaiting approval."},
-    "logout": {"gr": "Αποσύνδεση", "en": "Logout"},
-    "menu_header": {"gr": "Πλοήγηση", "en": "Navigation"}, # Changed from "Κεντρικό Μενού" for consistency
+    "reg_fail": {"gr": "Αποτυχία εγγραφής. Ελέγξτε τα στοιχεία.", "en": "Registration failed. Check details."},
+    "logout": {"gr": "🚪 Αποσύνδεση", "en": "🚪 Logout"},
+    "menu_header": {"gr": "Πλοήγηση", "en": "Navigation"},
     "general_ui_error": {"gr": "Προέκυψε σφάλμα στην εμφάνιση: {error}", "en": "An error occurred in the UI: {error}"},
     "db_init_success": {"gr": "Τοπική βάση δεδομένων (SQLite) αρχικοποιήθηκε.", "en": "Local database (SQLite) initialized."},
     "db_init_fail": {"gr": "Αποτυχία αρχικοποίησης τοπικής βάσης δεδομένων.", "en": "Failed to initialize local database."},
+    "lang_selector_title": {"gr": "Γλώσσα", "en": "Language"}, # NEW
+
+    # --- License Status ---
     "lic_activated": {"gr": "Άδεια χρήσης ενεργοποιήθηκε!", "en": "License activated!"},
     "lic_expired": {"gr": "Η άδεια χρήσης έχει λήξει.", "en": "License expired."},
     "lic_invalid": {"gr": "Μη έγκυρη άδεια χρήσης.", "en": "Invalid license."},
@@ -37,14 +41,14 @@ LANGUAGE_PACK = {
 
     # --- Menu Items ---
     "menu_dashboard": {"gr": "📊 Επισκόπηση", "en": "📊 Dashboard"},
-    "menu_diagnostics": {"gr": "🔧 Διαγνωστικά", "en": "🔧 Diagnostics"}, # Corrected icon
+    "menu_diagnostics": {"gr": "🔧 Διαγνωστικά", "en": "🔧 Diagnostics"},
     "menu_chat": {"gr": "💬 AI Συνομιλία", "en": "💬 AI Chat"},
     "menu_library": {"gr": "🔎 Βιβλιοθήκη Manuals", "en": "🔎 Manuals Library"},
-    "menu_clients": {"gr": "📇 Πελατολόγιο", "en": "📇 Client CRM"}, # Changed from "Clients" for consistency
+    "menu_clients": {"gr": "📇 Πελατολόγιο", "en": "📇 Client CRM"},
     "menu_organizer": {"gr": "📅 AI Organizer", "en": "📅 AI Organizer"},
     "menu_tools": {"gr": "🛠️ Εργαλεία", "en": "🛠️ Tools"},
-    "menu_admin": {"gr": "⚙️ Διαχείριση", "en": "⚙️ Admin Panel"}, # Changed from "Admin" for consistency
-    "menu_licensing": {"gr": "🔑 Διαχείριση Αδειών", "en": "🔑 Licensing"}, # Corrected icon
+    "menu_admin": {"gr": "⚙️ Διαχείριση", "en": "⚙️ Admin Panel"},
+    "menu_licensing": {"gr": "🔑 Διαχείριση Αδειών", "en": "🔑 Licensing"},
     "menu_tech_specs": {"gr": "📝 Τεχνικές Προδιαγραφές", "en": "📝 Tech Specs"},
     "menu_help_user": {"gr": "❓ Βοήθεια", "en": "❓ Help"},
 
@@ -63,7 +67,28 @@ LANGUAGE_PACK = {
     'dash_btn_tool': {'gr': "🛠️ Άνοιγμα Εργαλείων", 'en': "🛠️ Open Tools"},
     'dash_status': {'gr': "Κατάσταση Συστήματος: 🟢 Online | AI Engine: Ready", 'en': "System Status: 🟢 Online | AI Engine: Ready"},
 
-    # --- UI Diagnostics (Troubleshooting Wizard) - MERGED FROM OLD diagnose.py ---
+    # --- UI Chat (New/Modified Keys) ---
+    "chat_context_title": {"gr": "Επιλέξτε Συσκευή Context", "en": "Select Context Device"},
+    "brand_label": {"gr": "Μάρκα", "en": "Brand"},
+    "model_label": {"gr": "Μοντέλο", "en": "Model"},
+    "manuals_found": {"gr": "Βρέθηκαν {count} σχετικά manuals.", "en": "Found {count} related manuals."},
+    "no_manuals": {"gr": "Δεν βρέθηκαν σχετικά manuals.", "en": "No manuals found."},
+    "select_brand_for_search": {"gr": "Επιλέξτε μάρκα για αναζήτηση.", "en": "Select a brand for search."},
+    "tab_text": {"gr": "Κείμενο", "en": "Text"},
+    "tab_voice": {"gr": "Φωνή", "en": "Voice"},
+    "tab_upload": {"gr": "Upload", "en": "Upload"},
+    "voice_input_help": {"gr": "Πατήστε το μικρόφωνο για φωνητική εντολή.", "en": "Click the microphone for voice input."},
+    "voice_input_activated": {"gr": "Αναμονή για φωνητική εντολή...", "en": "Waiting for voice input..."},
+    "voice_stt_processing": {"gr": "Επεξεργασία φωνητικής εντολής...", "en": "Processing voice input..."},
+    "voice_stt_error": {"gr": "Σφάλμα φωνητικής αναγνώρισης: {error}", "en": "Voice recognition error: {error}"},
+    "upload_manual_label": {"gr": "Ανεβάστε PDF/Εικόνες", "en": "Upload PDF/Images"},
+    "processing_uploaded_file": {"gr": "Επεξεργασία ανεβασμένου αρχείου: '{name}'", "en": "Processing uploaded file: '{name}'"},
+    "studying_sources": {"gr": "Μελετώ {count} πηγές...", "en": "Studying {count} sources..."},
+    "ai_engine_error": {"gr": "Σφάλμα AI:", "en": "AI Error:"},
+    "analyzing": {"gr": "Ανάλυση...", "en": "Analyzing..."},
+    "chat_input_placeholder": {"gr": "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", "en": "Describe the issue or error code..."},
+
+    # --- UI Diagnostics (Troubleshooting Wizard) ---
     "diag_title": {"gr": "Διαγνωστικός Οδηγός", "en": "Diagnostic Guide"},
     "diag_subtitle": {"gr": "Βήμα-προς-Βήμα αντιμετώπιση προβλημάτων", "en": "Step-by-step troubleshooting"},
     "diag_start_new": {"gr": "Έναρξη Νέας Διάγνωσης", "en": "Start New Diagnosis"},
@@ -78,187 +103,231 @@ LANGUAGE_PACK = {
     "diag_btn_new": {"gr": "Νέα Διάγνωση", "en": "New Diagnosis"},
     "diag_action": {"gr": "Ενέργεια:", "en": "Action:"},
     "diag_question": {"gr": "Ερώτηση:", "en": "Question:"},
-    "diag_yes": {"gr": "✅ Ναι", "en": "✅ Yes"},
-    "diag_no": {"gr": "❌ Όχι", "en": "❌ No"},
-    "diag_tip": {"gr": "Συμβουλή:", "en": "Tip:"},
-    # --- UI Diagnostics (NEW AI System Status) ---
-    "diag_ai_section_title": {"gr": "🔬 Έλεγχος Κατάστασης AI Συστήματος", "en": "🔬 AI System Status Check"},
+    "diag_yes": {"gr": "✅ Ναι, Διορθώθηκε!", "en": "✅ Yes, Fixed!"},
+    "diag_solved_msg": {"gr": "Ωραία δουλειά! Το πρόβλημα λύθηκε.", "en": "Great job! Problem solved."},
+    "diag_no": {"gr": "➡️ Όχι, Συνέχεια", "en": "➡️ No, Continue"},
+    "diag_cancel": {"gr": "❌ Ακύρωση", "en": "❌ Cancel"},
+    "diag_plan_title": {"gr": "Αντιμετώπιση Προβλημάτων", "en": "Troubleshooting"},
+
+    # --- UI Diagnostics AI System Status Section ---
+    "diag_ai_section_title": {"gr": "Κατάσταση Συστήματος AI (Gemini)", "en": "AI System Status (Gemini)"},
     "diag_api_key_check": {"gr": "1. Έλεγχος Gemini API Key", "en": "1. Gemini API Key Check"},
     "diag_api_key_found": {"gr": "Το API Key βρέθηκε ({masked_key})", "en": "API Key found ({masked_key})"},
-    "diag_api_key_not_found": {"gr": "Δεν βρέθηκε το GEMINI_KEY στο secrets.toml", "en": "GEMINI_KEY not found in secrets.toml"},
-    "diag_api_key_info": {"gr": "Φτιάξτε φάκελο .streamlit/secrets.toml και βάλτε μέσα: GEMINI_KEY = 'YOUR_KEY'", "en": "Create .streamlit/secrets.toml and add: GEMINI_KEY = 'YOUR_KEY'"},
+    "diag_api_key_not_found": {"gr": "Δεν βρέθηκε το Gemini API Key.", "en": "Gemini API Key not found."},
+    "diag_api_key_info": {"gr": "Φτιάξτε φάκελο .streamlit/secrets.toml και προσθέστε: GEMINI_KEY = 'YOUR_KEY'", "en": "Create .streamlit/secrets.toml and add: GEMINI_KEY = 'YOUR_KEY'"},
     "diag_ai_conn_test": {"gr": "2. Σύνδεση με Google AI (Ping Test)", "en": "2. Google AI Connection (Ping Test)"},
     "diag_ai_conn_attempt": {"gr": "Προσπάθεια σύνδεσης με Google Servers", "en": "Attempting connection to Google Servers"},
     "diag_ai_conn_success": {"gr": "Επιτυχία! Συνδέθηκε και βρήκε {count} διαθέσιμα μοντέλα.", "en": "Success! Connected and found {count} available models."},
     "diag_ai_conn_fail": {"gr": "Αποτυχία Σύνδεσης: {error}", "en": "Connection Failed: {error}"},
+    "diag_selected_model": {"gr": "Επιλεγμένο μοντέλο: **{model_name}**", "en": "Selected model: **{model_name}**"},
     "diag_pdf_test": {"gr": "3. Έλεγχος PDF Engine (pypdf)", "en": "3. PDF Engine Check (pypdf)"},
-    "diag_pdf_read_success": {"gr": "Το PDF engine (pypdf) λειτουργεί κανονικά.", "en": "PDF engine (pypdf) is working correctly."},
-    "diag_pdf_read_fail": {"gr": "Το PDF engine απέτυχε να διαβάσει ένα PDF: {error}", "en": "PDF engine failed to read a PDF: {error}"},
-    "diag_simulation_title": {"gr": "4. Προσομοίωση Απάντησης (Test Run)", "en": "4. Response Simulation (Test Run)"},
-    "diag_simulation_prompt": {"gr": "Στέλνω δοκιμαστική ερώτηση στο AI", "en": "Sending test query to AI"},
-    "diag_simulation_success": {"gr": "AI Response: {response_start}...", "en": "AI Response: {response_start}..."},
-    "diag_simulation_fail": {"gr": "Αποτυχία λήψης απάντησης από AI: {error}", "en": "Failed to get AI response: {error}"},
-    "diag_selected_model": {"gr": "Το σύστημα επέλεξε αυτόματα το μοντέλο: **{model_name}**", "en": "The system automatically selected model: **{model_name}**"},
+    "diag_pdf_read_success": {"gr": "Το pypdf εγκαταστάθηκε και λειτουργεί.", "en": "pypdf installed and working."},
+    "diag_pdf_read_fail": {"gr": "Σφάλμα pypdf: {error}. Εγκαταστήστε με 'pip install pypdf'", "en": "pypdf error: {error}. Install with 'pip install pypdf'"},
+    "diag_ai_test_run": {"gr": "4. Προσομοίωση Απάντησης (Test Run)", "en": "4. Response Simulation (Test Run)"},
+    "diag_ai_test_query": {"gr": "Στέλνω δοκιμαστική ερώτηση στο {model_name}...", "en": "Sending test query to {model_name}..."},
+    "diag_ai_test_success": {"gr": "Το AI απάντησε: '{response}'", "en": "AI responded: '{response}'"},
+    "diag_ai_test_empty": {"gr": "Το AI απάντησε αλλά το κείμενο ήταν κενό.", "en": "AI responded but text was empty."},
+    "diag_ai_critical_error": {"gr": "ΚΡΙΣΙΜΟ ΣΦΑΛΜΑ AI: {error}", "en": "CRITICAL AI ERROR: {error}"},
+    "diag_ai_quota_error": {"gr": "Το πρόβλημα είναι το QUOTA (429). Το κλειδί έχει ξεπεράσει τα όρια.", "en": "Problem is QUOTA (429). Key exceeded limits."},
+    "diag_ai_key_invalid": {"gr": "Το κλειδί δεν είναι έγκυρο.", "en": "Key is invalid."},
+    "diag_ai_model_not_found": {"gr": "Το μοντέλο δεν βρέθηκε. Δοκιμάστε αναβάθμιση.", "en": "Model not found. Try upgrading."},
+    "diag_ai_unknown_error": {"gr": "Άγνωστο σφάλμα δικτύου/συστήματος.", "en": "Unknown network/system error."},
+
+    # --- UI Search ---
+    "search_lib_sync_btn": {"gr": "🔄 Sync Library / Ανανέωση Βιβλιοθήκης", "en": "🔄 Sync Library / Refresh Library"},
+    "search_sync_spinner": {"gr": "⏳ Σάρωση Drive & Ενημέρωση Ευρετηρίου...", "en": "⏳ Scanning Drive & Updating Index..."},
+    "search_sync_success": {"gr": "✅ Ολοκληρώθηκε! Το ευρετήριο ενημερώθηκε. ({count} αρχεία)", "en": "✅ Complete! Index updated. ({count} files)"},
+    "search_sync_error": {"gr": "❌ Σφάλμα κατά την ενημέρωση βιβλιοθήκης: {error}", "en": "❌ Error during library sync: {error}"},
+    "search_load_spinner": {"gr": "☁️ Φόρτωση Βιβλιοθήκης...", "en": "☁️ Loading Library..."},
+    "search_no_data": {"gr": "ℹ️ Δεν βρέθηκαν δεδομένα στη βιβλιοθήκη. Πατήστε 'Sync' για αρχικοποίηση.", "en": "ℹ️ No library data found. Press 'Sync' to initialize."},
+    "search_library_empty_warning": {"gr": "⚠️ Η βιβλιοθήκη είναι κενή.", "en": "⚠️ The library is empty."},
+    "search_library_sync_info": {"gr": "Το σύστημα προσπαθεί να συγχρονίσει... Αν επιμένει, ειδοποιήστε τον Admin.", "en": "The system is trying to sync... If it persists, notify Admin."},
+    "search_stats_expander": {"gr": "📊 Στατιστικά Ευρετηρίου ({count} έγγραφα)", "en": "📊 Index Statistics ({count} documents)"},
+    "search_brands": {"gr": "Μάρκες", "en": "Brands"},
+    "search_doc_types": {"gr": "Τύποι Εγγράφων", "en": "Document Types"},
+    "search_input_ph": {"gr": "π.χ. Daikin Altherma J3 Error", "en": "e.g. Daikin Altherma J3 Error"},
+    "search_voice_info": {"gr": "🎧 Λειτουργία φωνητικής αναζήτησης υπό ανάπτυξη...", "en": "🎧 Voice search feature under development..."},
+    "search_no_results": {"gr": "Δεν βρέθηκαν αποτελέσματα.", "en": "No results found."},
+    "search_recent_files": {"gr": "Πρόσφατα καταχωρημένα αρχεία:", "en": "Recently added files:"},
+    "search_file_name": {"gr": "Όνομα αρχείου", "en": "Filename"},
+    "search_view_manual": {"gr": "👁️ Προβολή Manual", "en": "👁️ View Manual"},
+    "search_download_manual": {"gr": "⬇️ Λήψη Manual", "en": "⬇️ Download Manual"},
+    "search_download_error": {"gr": "Σφάλμα κατά τη λήψη: {error}", "en": "Error during download: {error}"},
+    "search_docs_found": {"gr": "Βρέθηκαν {count} έγγραφα.", "en": "{count} documents found."},
 
 
-    # --- CHAT & MEDIA ---
-    'chat_placeholder': {'gr': "Περιγράψτε το πρόβλημα...", 'en': "Describe the issue..."},
-    'chat_thinking': {'gr': "🤔 Ο Mastro Nek αναλύει...", 'en': "🤔 Mastro Nek is thinking..."},
-    'chat_intro': {'gr': "👋 Γεια σου! Ρώτησέ με για βλάβες ή manuals.", 'en': "👋 Hello! Ask me about faults or manuals."},
-    'media_expander': {'gr': "📸 Κάμερα & 🎙️ Φωνητική Εντολή", 'en': "📸 Camera & 🎙️ Voice Input"}, # UNUSED FOR NOW
-    'camera_label': {'gr': "📸 Τράβηξε Φωτογραφία", 'en': "📸 Take Photo"}, # UNUSED FOR NOW
-    'audio_label': {'gr': "🎙️ Ηχογράφηση / Αρχείο Ήχου", 'en': "🎙️ Voice Message / Audio File"}, # UNUSED FOR NOW
-    'media_sent': {'gr': "✅ Τα αρχεία επισυνάφθηκαν!", 'en': "✅ Files attached!"}, # UNUSED FOR NOW
-    'brand_label': {'gr': "Μάρκα", 'en': "Brand"}, # Standardized
-    'model_label': {'gr': "Μοντέλο", 'en': "Model"}, # Standardized
-    'manual_retrieval_error': {'gr': "Σφάλμα ανάκτησης manual: {error}", 'en': "Manual retrieval error: {error}"},
-    'manuals_found': {'gr': "Βρέθηκαν {count} σχετικά manuals.", 'en': "{count} relevant manuals found."},
-    'no_manuals': {'gr': "Δεν βρέθηκαν manuals για τη μάρκα/μοντέλο.", 'en': "No manuals found for brand/model."},
-    'select_brand_for_search': {'gr': "Επιλέξτε μάρκα για αναζήτηση.", 'en': "Select a brand to search."},
-    'chat_input_placeholder': {'gr': "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", 'en': "Describe the issue or error code..."},
-    'voice_input_help': {'gr': "Χρησιμοποιήστε μικρόφωνο για φωνητική εντολή.", "en": "Use microphone for voice input."},
-    'voice_input_activated': {'gr': "Αναμονή για φωνητική εντολή...", "en": "Waiting for voice input..."},
-    'upload_manual_label': {'gr': "Ανεβάστε PDF/Εικόνες", 'en': "Upload PDF/Images"}, # From old chat
-    'upload_manual_help': {'gr': "Ανεβάστε αρχεία για ανάλυση από το AI.", 'en': "Upload files for AI analysis."}, # From old chat
-    'processing_uploaded_file': {'gr': "Επεξεργασία ανεβασμένου αρχείου: '{name}'", 'en': "Processing uploaded file: '{name}'"},
-    'studying_sources': {'gr': "Μελετώ {count} πηγές...", 'en': "Studying {count} sources..."},
-    'tab_text': {'gr': "⌨️ Κείμενο", 'en': "⌨️ Text"}, # NEW KEY
-    'tab_voice': {'gr': "🎙️ Φωνή", 'en': "🎙️ Voice"}, # NEW KEY
-    'tab_upload': {'gr': "📎 Ανέβασμα", 'en': "📎 Upload"}, # NEW KEY
-    'upload_files_label': {'gr': "Ανεβάστε PDF/Εικόνα", 'en': "Upload PDF/Image"}, # NEW KEY
-    'ai_engine_error': {'gr': "Σφάλμα AI:", 'en': "AI Error:"}, # NEW KEY
-    'analyzing': {'gr': "Ανάλυση...", 'en': "Analyzing..."}, # NEW KEY
+    # --- UI Admin Panel ---
+    "admin_title": {"gr": "⚙️ Διαχείριση Χρηστών & Συστήματος", "en": "⚙️ User & System Administration"},
+    "admin_no_users": {"gr": "Δεν βρέθηκαν χρήστες στη βάση δεδομένων.", "en": "No users found in database."},
+    "admin_pending": {"gr": "Αιτήματα για Έγκριση", "en": "Pending Approval Requests"},
+    "admin_no_pending": {"gr": "Δεν υπάρχουν εκκρεμή αιτήματα χρηστών.", "en": "No pending user requests."},
+    "admin_btn_activate": {"gr": "✅ Ενεργοποίηση", "en": "✅ Activate"},
+    "admin_btn_delete": {"gr": "❌ Διαγραφή", "en": "❌ Delete"},
+    "admin_msg_active": {"gr": "Ο χρήστης ενεργοποιήθηκε", "en": "User activated"},
+    "admin_msg_del": {"gr": "Ο χρήστης διαγράφηκε", "en": "User deleted"},
+    "admin_all_users": {"gr": "Όλοι οι Εγγεγραμμένοι Χρήστες", "en": "All Registered Users"},
+    "admin_all_users_cap": {"gr": "Διαχειριστείτε τους ρόλους των χρηστών.", "en": "Manage user roles."},
+    "admin_role_updated": {"gr": "Ο ρόλος του χρήστη {email} ενημερώθηκε σε {role}.", "en": "User {email}'s role updated to {role}."},
+    "admin_logs_tab": {"gr": "📊 System Logs", "en": "📊 System Logs"},
+    "admin_users_tab": {"gr": "👥 User Management", "en": "👥 User Management"},
+    "admin_sync_tab": {"gr": "☁️ Library Sync", "en": "☁️ Library Sync"},
+    "admin_maintenance_tab": {"gr": "🔄 Maintenance", "en": "🔄 Maintenance"},
+    "admin_audit_logs_subheader": {"gr": "Audit Logs (Security & Usage)", "en": "Audit Logs (Security & Usage)"},
+    "admin_no_logs": {"gr": "Δεν βρέθηκαν logs.", "en": "No logs found."},
+    "admin_registered_users_subheader": {"gr": "Εγγεγραμμένοι Χρήστες", "en": "Registered Users"},
+    "admin_drive_sync_subheader": {"gr": "Google Drive Synchronization", "en": "Google Drive Synchronization"},
+    "admin_drive_sync_desc": {"gr": "Χρησιμοποιήστε αυτό το εργαλείο αν η βιβλιοθήκη φαίνεται άδεια ή αν προσθέσατε νέα manuals.", "en": "Use this tool if the library appears empty or if you added new manuals."},
+    "admin_current_files_in_memory": {"gr": "Τρέχοντα Αρχεία στη Μνήμη:", "en": "Current Files in Memory:"},
+    "admin_btn_force_sync": {"gr": "🚀 FORCE FULL SYNC", "en": "🚀 FORCE FULL SYNC"},
+    "admin_missing_modules": {"gr": "Λείπουν Modules (smart_library ή drive). Δεν είναι δυνατός ο συγχρονισμός.", "en": "Missing Modules (smart_library or drive). Cannot sync."},
+    "admin_drive_config_missing": {"gr": "Drive Config missing (Folder ID).", "en": "Drive Config missing (Folder ID)."},
+    "admin_scanning_drive_spinner": {"gr": "⏳ Σάρωση Google Drive (Μπορεί να πάρει χρόνο)...", "en": "⏳ Scanning Google Drive (This may take time)..."},
+    "admin_sync_complete": {"gr": "Ο συγχρονισμός ολοκληρώθηκε! Ευρετηρία {count} αρχεία.", "en": "Sync Complete! Indexed {count} files."},
+    "admin_sync_failed": {"gr": "Ο συγχρονισμός απέτυχε: {error}", "en": "Sync Failed: {error}"},
+    "admin_software_updates_subheader": {"gr": "Ενημερώσεις Λογισμικού", "en": "Software Updates"},
+    "admin_btn_check_github": {"gr": "Check GitHub for Updates", "en": "Check GitHub for Updates"},
+    "admin_pulling_repo_spinner": {"gr": "Pulling from repository...", "en": "Pulling from repository..."},
+    "admin_new_code_pulled_warning": {"gr": "⚠️ Νέος κώδικας λήφθηκε. Παρακαλώ επανεκκινήστε την εφαρμογή.", "en": "⚠️ New code pulled. Please restart the app."},
 
-    # --- UI ADMIN PANEL ---
-    'admin_title': {"gr": "Πίνακας Διαχείρισης", "en": "Admin Panel"},
-    'admin_no_users': {"gr": "Δεν βρέθηκαν χρήστες.", "en": "No users found."},
-    'admin_pending': {"gr": "Αιτήματα για Έγκριση", "en": "Pending Approvals"},
-    'admin_no_pending': {"gr": "Δεν υπάρχουν εκκρεμή αιτήματα.", "en": "No pending requests."},
-    'admin_btn_activate': {"gr": "Ενεργοποίηση", "en": "Activate"},
-    'admin_msg_active': {"gr": "Ο χρήστης ενεργοποιήθηκε", "en": "User activated"},
-    'admin_btn_delete': {"gr": "Διαγραφή", "en": "Delete"},
-    'admin_msg_del': {"gr": "Ο χρήστης διαγράφηκε", "en": "User deleted"},
-    'admin_all_users': {"gr": "Όλοι οι Χρήστες", "en": "All Users"},
-    'admin_all_users_cap': {"gr": "Διαχείριση δικαιωμάτων & ρόλων χρηστών", "en": "Manage user rights & roles"},
 
-    # --- UI TOOLS ---
-    'tool_btu_tab': {'gr': "❄️ Υπολογιστής BTU", 'en': "❄️ BTU Calculator"},
-    'tool_conv_tab': {'gr': "🔄 Μετατροπές", 'en': "🔄 Converters"},
-    'tool_pipe_tab': {'gr': "📏 Οδηγός Σωληνώσεων", 'en': "📏 Piping Guide"},
-    'tool_area': {'gr': "Εμβαδόν Χώρου (m²)", 'en': "Room Area (m²)"},
+    # --- UI Licensing ---
+    "lic_page_title": {"gr": "🔑 Διαχείριση Αδειών Χρήσης", "en": "🔑 License Management"},
+    "lic_user_section_title": {"gr": "Κατάσταση Άδειας Χρήστη", "en": "User License Status"},
+    "lic_status_label": {"gr": "Κατάσταση Άδειας:", "en": "License Status:"},
+    "lic_enter_key": {"gr": "Εισάγετε Κλειδί Άδειας Χρήσης", "en": "Enter License Key"},
+    "lic_key_ph": {"gr": "π.χ. A1B2C-D3E4F-G5H6I", "en": "e.g. A1B2C-D3E4F-G5H6I"},
+    "lic_btn_activate": {"gr": "Ενεργοποίηση Άδειας", "en": "Activate License"},
+    "lic_activation_success": {"gr": "Η άδεια ενεργοποιήθηκε επιτυχώς!", "en": "License activated successfully!"},
+    "lic_activation_fail": {"gr": "Αποτυχία ενεργοποίησης άδειας", "en": "License activation failed"},
+    "lic_admin_section_title": {"gr": "Διαχείριση Αδειών (Admin)", "en": "License Management (Admin)"},
+    "lic_admin_no_licenses": {"gr": "Δεν βρέθηκαν άδειες προς διαχείριση.", "en": "No licenses to manage."},
+    "lic_admin_all_licenses": {"gr": "Όλες οι Άδειες Χρήσης", "en": "All User Licenses"},
+    "lic_admin_filter_users": {"gr": "Φίλτρο Χρηστών (Email, Ρόλος)", "en": "Filter Users (Email, Role)"},
+    "lic_admin_user_email": {"gr": "Email", "en": "Email"},
+    "lic_admin_current_role": {"gr": "Τρέχων Ρόλος", "en": "Current Role"},
+    "lic_admin_new_role": {"gr": "Νέος Ρόλος", "en": "New Role"},
+    "lic_admin_role_pending": {"gr": "Εκκρεμής", "en": "Pending"},
+    "lic_admin_role_active": {"gr": "Ενεργός", "en": "Active"},
+    "lic_admin_role_admin": {"gr": "Διαχειριστής", "en": "Admin"},
+    "lic_admin_role_inactive": {"gr": "Ανενεργός", "en": "Inactive"},
+    "lic_admin_btn_update_role": {"gr": "Ενημέρωση Ρόλου", "en": "Update Role"},
+    "lic_admin_role_update_success": {"gr": "Ο ρόλος ενημερώθηκε επιτυχώς!", "en": "Role updated successfully!"},
+    "lic_admin_role_update_fail": {"gr": "Αποτυχία ενημέρωσης ρόλου.", "en": "Failed to update role."},
+
+    # --- UI Organizer ---
+    "org_desc": {"gr": "Ο AI Organizer σαρώνει το Google Drive σας, αναλύει τα PDF και τις εικόνες με τεχνητή νοημοσύνη και ταξινομεί αυτόματα τα αρχεία σε δομημένους φακέλους (π.χ. Μάρκα, Μοντέλο, Τύπος Εγχειριδίου). Αυτοματοποιήστε την οργάνωση της βιβλιοθήκης σας!", "en": "The AI Organizer scans your Google Drive, analyzes PDFs and images with AI, and automatically sorts files into structured folders (e.g., Brand, Model, Manual Type). Automate your library organization!"},
+    "org_summary_last_run": {"gr": "Σύνοψη Τελευταίας Εκτέλεσης", "en": "Summary of Last Run"},
+    "org_last_updated": {"gr": "Τελευταία ενημέρωση:", "en": "Last updated:"},
+    "org_files_scanned": {"gr": "Σαρωμένα Αρχεία", "en": "Files Scanned"},
+    "org_successfully_sorted": {"gr": "Επιτυχώς Ταξινομημένα", "en": "Successfully Sorted"},
+    "org_manual_review": {"gr": "Για Χειροκίνητο Έλεγχο", "en": "For Manual Review"},
+    "org_irrelevant_unknown": {"gr": "Άσχετα/Άγνωστα", "en": "Irrelevant/Unknown"},
+    "org_duplicates": {"gr": "Διπλότυπα", "en": "Duplicates"},
+    "org_detailed_success_dist": {"gr": "Αναλυτική Κατανομή Επιτυχών Ταξινομήσεων", "en": "Detailed Distribution of Successful Sorts"},
+    "org_categories_tab": {"gr": "Κατηγορίες", "en": "Categories"},
+    "org_brands_tab": {"gr": "Μάρκες", "en": "Brands"},
+    "org_types_tab": {"gr": "Τύποι Εγχειριδίων", "en": "Manual Types"},
+    "org_no_data_categories": {"gr": "Δεν υπάρχουν δεδομένα για κατηγορίες.", "en": "No data for categories."},
+    "org_no_data_brands": {"gr": "Δεν υπάρχουν δεδομένα για μάρκες.", "en": "No data for brands."},
+    "org_no_data_types": {"gr": "Δεν υπάρχουν δεδομένα για τύπους εγχειριδίων.", "en": "No data for manual types."},
+    "org_start_sorting_subheader": {"gr": "Έναρξη Ταξινόμησης & Οργάνωσης", "en": "Start Sorting & Organizing"},
+    "org_warning_active_sort": {"gr": "⚠️ Η ταξινόμηση είναι ήδη σε εξέλιξη.", "en": "⚠️ Sorting is already in progress."},
+    "org_start_button": {"gr": "🚀 Έναρξη AI Sorting", "en": "🚀 Start AI Sorting"},
+    "org_stop_button": {"gr": "⏹️ Διακοπή", "en": "⏹️ Stop"},
+    "org_force_resort_checkbox": {"gr": "Επανεπεξεργασία ΟΛΩΝ των αρχείων (ακόμη και τα ήδη ταξινομημένα)", "en": "Reprocess ALL files (even already sorted ones)"},
+    "org_no_files_to_sort": {"gr": "Δεν βρέθηκαν αρχεία για ταξινόμηση στον φάκελο.", "en": "No files found to sort in the root folder."},
+    "org_sorting_started": {"gr": "✅ Η ταξινόμηση ξεκίνησε!", "en": "✅ Sorting started!"},
+    "org_sorting_stopped": {"gr": "Η ταξινόμηση διακόπηκε από τον χρήστη.", "en": "Sorting stopped by user."},
+    "org_sorting_completed": {"gr": "✅ Η ταξινόμηση ολοκληρώθηκε!", "en": "✅ Sorting completed!"},
+    "org_browse_files_tab": {"gr": "🔍 Περιήγηση Αρχείων", "en": "🔍 Browse Files"},
+    "org_review_errors_tab": {"gr": "⚠️ Αναθεώρηση / Σφάλματα", "en": "⚠️ Review / Errors"},
+    "org_full_log_tab": {"gr": "📜 Πλήρες Log", "en": "📜 Full Log"},
+    "org_browse_categories": {"gr": "Κατηγορίες", "en": "Categories"},
+    "org_browse_brands": {"gr": "Μάρκες", "en": "Brands"},
+    "org_browse_models": {"gr": "Μοντέλα", "en": "Models"},
+    "org_browse_types": {"gr": "Τύποι Εγχειριδίων", "en": "Manual Types"},
+    "org_browse_files_for_category": {"gr": "Αρχεία για Κατηγορία: {category}", "en": "Files for Category: {category}"},
+    "org_browse_files_for_brand": {"gr": "Αρχεία για Μάρκα: {brand}", "en": "Files for Brand: {brand}"},
+    "org_browse_files_for_model": {"gr": "Αρχεία για Μοντέλο: {model}", "en": "Files for Model: {model}"},
+    "org_browse_files_for_type": {"gr": "Αρχεία για Τύπο: {type}", "en": "Files for Type: {type}"},
+    "org_back_to_categories": {"gr": "⬅️ Πίσω στις Κατηγορίες", "en": "⬅️ Back to Categories"},
+    "org_back_to_brands": {"gr": "⬅️ Πίσω στις Μάρκες", "en": "⬅️ Back to Brands"},
+    "org_back_to_models": {"gr": "⬅️ Πίσω στα Μοντέλα", "en": "⬅️ Back to Models"},
+    "org_back_to_types": {"gr": "⬅️ Πίσω στους Τύπους", "en": "⬅️ Back to Types"},
+    "org_total_files": {"gr": "Σύνολο Αρχείων: {count}", "en": "Total Files: {count}"},
+    "org_view_drive": {"gr": "👁️ Προβολή στο Drive", "en": "👁️ View in Drive"},
+    "org_manual_review_section": {"gr": "Αρχεία για Χειροκίνητο Έλεγχο", "en": "Files for Manual Review"},
+    "org_irrelevant_section": {"gr": "Άσχετα/Άγνωστα Αρχεία", "en": "Irrelevant/Unknown Files"},
+    "org_duplicates_section": {"gr": "Διπλότυπα Αρχεία", "en": "Duplicate Files"},
+    "org_failed_section": {"gr": "Αποτυχημένα Αρχεία", "en": "Failed Files"},
+    "org_no_files_in_category": {"gr": "Δεν βρέθηκαν αρχεία σε αυτή την κατηγορία.", "en": "No files found in this category."},
+    "org_full_log_section": {"gr": "Πλήρες Log Εκτέλεσης Organizer", "en": "Full Organizer Run Log"},
+    "org_no_log_entries": {"gr": "Δεν υπάρχουν καταχωρήσεις log.", "en": "No log entries."},
+
+
+    # --- UI Tools ---
+    'tool_btu_tab': {'gr': "❄️ BTU Calculator", 'en': "❄️ BTU Calculator"},
+    'tool_conv_tab': {'gr': "📏 Μετατροπέας", 'en': "📏 Converter"},
+    'tool_pipe_tab': {'gr': "🔥 Σωληνώσεις", 'en': "🔥 Piping Guide"},
+    'tool_area': {'gr': "Εμβαδόν Χώρου (m²)", 'en': "Area (m²)"},
     'tool_height': {'gr': "Ύψος (m)", 'en': "Height (m)"},
     'tool_insulation': {'gr': "Μόνωση", 'en': "Insulation"},
     'ins_good': {'gr': "Καλή", 'en': "Good"},
     'ins_avg': {'gr': "Μέτρια", 'en': "Average"},
-    'ins_bad': {'gr': "Κακή", 'en': "Bad"},
+    'ins_bad': {'gr': "Κακή", 'en': "Poor"},
     'tool_sun': {'gr': "Έκθεση στον Ήλιο", 'en': "Sun Exposure"},
     'sun_low': {'gr': "Χαμηλή", 'en': "Low"},
     'sun_med': {'gr': "Μέτρια", 'en': "Medium"},
     'sun_high': {'gr': "Υψηλή", 'en': "High"},
     'tool_calc_res': {'gr': "Απαιτούμενη Ισχύς", 'en': "Required Power"},
-    'tool_rec': {'gr': "Προτεινόμενο AC", 'en': "Recommended AC"},
+    'tool_rec': {'gr': "Προτεινόμενο κλιματιστικό", 'en': "Recommended AC Unit"},
     'pipe_liquid': {'gr': "Υγρό", 'en': "Liquid"},
     'pipe_gas': {'gr': "Αέριο", 'en': "Gas"},
+    "converter_value": {"gr": "Τιμή", "en": "Value"},
+    "converter_type": {"gr": "Τύπος", "en": "Type"},
+    "converter_bar_psi": {"gr": "Bar -> PSI", "en": "Bar -> PSI"},
+    "converter_c_f": {"gr": "C -> F", "en": "C -> F"},
+    "converter_kw_btu": {"gr": "kW -> BTU", "en": "kW -> BTU"},
+    "piping_guide_title": {"gr": "Οδηγός Σωληνώσεων R32/R410a", "en": "R32/R410a Piping Guide"},
 
-    # --- UI LICENSING ---
-    "lic_page_title": {"gr": "Διαχείριση Αδειών Χρήσης", "en": "License Management"},
-    "lic_user_section_title": {"gr": "Κατάσταση Άδειας Χρήστη", "en": "User License Status"},
-    "lic_status_label": {"gr": "Κατάσταση:", "en": "Status:"},
-    "lic_enter_key": {"gr": "Εισάγετε Κωδικό Άδειας", "en": "Enter License Key"},
-    "lic_key_ph": {"gr": "Πληκτρολογήστε τον κωδικό άδειας εδώ...", "en": "Type your license key here..."},
-    "lic_btn_activate": {"gr": "Ενεργοποίηση Άδειας", "en": "Activate License"},
-    "lic_activation_success": {"gr": "Η άδεια ενεργοποιήθηκε με επιτυχία!", "en": "License activated successfully!"},
-    "lic_activation_fail": {"gr": "Αποτυχία ενεργοποίησης άδειας", "en": "License activation failed"},
-    "lic_admin_section_title": {"gr": "Διαχείριση Αδειών (Admin)", "en": "License Management (Admin)"},
-    "lic_admin_no_licenses": {"gr": "Δεν βρέθηκαν καταχωρημένες άδειες.", "en": "No registered licenses found."},
-    "lic_admin_all_licenses": {"gr": "Όλοι οι Χρήστες & Άδειες", "en": "All Users & Licenses"},
-    "lic_admin_filter_users": {"gr": "Φιλτράρισμα χρηστών...", "en": "Filter users..."},
-    "lic_admin_role": {"gr": "Ρόλος", "en": "Role"},
-    "lic_admin_expiry_date": {"gr": "Ημερομηνία Λήξης", "en": "Expiry Date"},
-    "lic_admin_update_license": {"gr": "Ενημέρωση Άδειας", "en": "Update License"},
-    "lic_admin_update_success": {"gr": "Οι ρυθμίσεις άδειας ενημερώθηκαν.", "en": "License settings updated."},
-    "lic_admin_update_fail": {"gr": "Αποτυχία ενημέρωσης ρυθμίσεων άδειας.", "en": "Failed to update license settings."},
-    "lic_admin_grant_license": {"gr": "Εκχώρηση Άδειας", "en": "Grant License"},
-    "lic_admin_revoke_license": {"gr": "Ανάκληση Άδειας", "en": "Revoke License"},
 
-    # --- UI ORGANIZER ---
-    "org_desc": {"gr": "Αυτόματο σύστημα ταξινόμησης και οργάνωσης εγχειριδίων στο Google Drive. Χρησιμοποιεί τεχνητή νοημοσύνη για να αναγνωρίσει, να μετονομάσει και να αρχειοθετήσει αυτόματα τα αρχεία σας σε μια δομημένη ιεραρχία.", "en": "Automatic system for sorting and organizing manuals in Google Drive. Uses AI to automatically recognize, rename, and archive your files into a structured hierarchy."},
-    "org_start_sorting": {"gr": "Έναρξη Αυτόματης Ταξινόμησης", "en": "Start Auto-Sorting"},
-    "org_stop_sorting": {"gr": "Διακοπή Ταξινόμησης", "en": "Stop Sorting"},
-    "org_full_resort_checkbox": {"gr": "Πλήρης Επανεπεξεργασία (διαγράφει τα παλιά αρχεία και ξαναταξινομεί)", "en": "Full Resort (deletes old files and resorts)"},
-    "org_progress_title": {"gr": "Εξέλιξη Ταξινόμησης:", "en": "Sorting Progress:"},
-    "org_summary_tab": {"gr": "📊 Σύνοψη & Εκτέλεση", "en": "📊 Summary & Execution"},
-    "org_browse_tab": {"gr": "🔍 Περιήγηση Αρχείων", "en": "🔍 Browse Files"},
-    "org_review_tab": {"gr": "⚠️ Αναθεώρηση / Σφάλματα", "en": "⚠️ Review / Errors"},
-    "org_log_tab": {"gr": "📜 Πλήρες Log", "en": "📜 Full Log"},
-    "org_summary_title": {"gr": "📊 Σύνοψη Τελευταίας Εκτέλεσης", "en": "📊 Last Run Summary"},
-    "org_last_update": {"gr": "Τελευταία ενημέρωση:", "en": "Last Update:"},
-    "org_scanned_files": {"gr": "Σαρωμένα Αρχεία", "en": "Scanned Files"},
-    "org_sorted_successfully": {"gr": "Επιτυχώς Ταξινομημένα", "en": "Successfully Sorted"},
-    "org_manual_review": {"gr": "Για Χειροκίνητο Έλεγχο", "en": "For Manual Review"},
-    "org_irrelevant": {"gr": "Άσχετα/Άγνωστα", "en": "Irrelevant/Unknown"},
-    "org_duplicates": {"gr": "Διπλότυπα", "en": "Duplicates"},
-    "org_distribution_success": {"gr": "Αναλυτική Κατανομή Επιτυχών Ταξινομήσεων", "en": "Detailed Distribution of Successful Sorts"},
-    "org_category_tab": {"gr": "Κατηγορίες", "en": "Categories"},
-    "org_brand_tab": {"gr": "Μάρκες", "en": "Brands"},
-    "org_type_tab": {"gr": "Τύποι Εγχειριδίων", "en": "Manual Types"},
-    "org_no_summary_data": {"gr": "Δεν υπάρχουν δεδομένα σύνοψης.", "en": "No summary data available."},
-    "org_browse_title": {"gr": "Περιήγηση Ταξινομημένων Αρχείων", "en": "Browse Sorted Files"},
-    "org_go_back": {"gr": "Επιστροφή", "en": "Go Back"},
-    "org_select_category": {"gr": "Επιλέξτε Κατηγορία", "en": "Select Category"},
-    "org_select_brand": {"gr": "Επιλέξτε Μάρκα", "en": "Select Brand"},
-    "org_select_model": {"gr": "Επιλέξτε Μοντέλο", "en": "Select Model"},
-    "org_select_type": {"gr": "Επιλέξτε Τύπο", "en": "Select Type"},
-    "org_current_level": {"gr": "Τρέχον επίπεδο:", "en": "Current Level:"},
-    "org_files_in_category": {"gr": "Αρχεία στην Κατηγορία '{category}'", "en": "Files in Category '{category}'"},
-    "org_files_in_brand": {"gr": "Αρχεία στη Μάρκα '{brand}' (Κατηγορία: {category})", "en": "Files in Brand '{brand}' (Category: {category})"},
-    "org_files_in_model": {"gr": "Αρχεία στο Μοντέλο '{model}' (Μάρκα: {brand})", "en": "Files in Model '{model}' (Brand: {brand})"},
-    "org_files_in_type": {"gr": "Αρχεία Τύπου '{type}' (Μοντέλο: {model})", "en": "Files of Type '{type}' (Model: {model})"},
-    "org_review_title": {"gr": "Αρχεία για Χειροκίνητο Έλεγχο & Σφάλματα", "en": "Files for Manual Review & Errors"},
-    "org_manual_review_info": {"gr": "Αυτά τα αρχεία μετακινήθηκαν στο φάκελο '_MANUAL_REVIEW' γιατί το AI δεν ήταν σίγουρο για την ταξινόμησή τους.", "en": "These files were moved to '_MANUAL_REVIEW' because the AI was unsure about their classification."},
-    "org_irrelevant_info": {"gr": "Αυτά τα αρχεία μετακινήθηκαν στο φάκελο '_IRRELEVANT_OR_UNKNOWN' γιατί δεν σχετίζονται με HVAC ή δεν μπορούσαν να αναγνωριστούν.", "en": "These files were moved to '_IRRELEVANT_OR_UNKNOWN' because they are not HVAC-related or could not be identified."},
-    "org_duplicate_info": {"gr": "Αυτά τα αρχεία είναι διπλότυπα και μετακινήθηκαν στο φάκελο '_DUPLICATES'.", "en": "These files are duplicates and have been moved to '_DUPLICATES' folder."},
-    "org_failed_info": {"gr": "Αυτά τα αρχεία απέτυχαν να επεξεργαστούν λόγω τεχνικού προβλήματος.", "en": "These files failed to process due to a technical issue."},
-    "org_view_on_drive": {"gr": "Προβολή στο Drive", "en": "View on Drive"},
-    "org_full_log_title": {"gr": "Πλήρες Ημερολόγιο Εκτέλεσης", "en": "Full Execution Log"},
-    "org_log_empty": {"gr": "Το ημερολόγιο εκτέλεσης είναι κενό.", "en": "The execution log is empty."},
-
-    # --- UI CLIENTS ---
-    "client_no_clients": {"gr": "Δεν βρέθηκαν πελάτες.", "en": "No clients found."},
-    "client_search_ph": {"gr": "Αναζήτηση Πελάτη...", "en": "Search Client..."},
-
-    # --- UI TECH SPECS ---
-    "specs_title": {"gr": "Τεχνικές Προδιαγραφές", "en": "Technical Specifications"},
-    "specs_system_architecture": {"gr": "🧬 Αρχιτεκτονική Συστήματος", "en": "🧬 System Architecture"},
-    "specs_status_monitor": {"gr": "📊 Έλεγχος Κατάστασης", "en": "📊 Status Monitor"},
+    # --- UI Tech Specs ---
+    "specs_title": {"gr": "📝 Τεχνικές Προδιαγραφές Συστήματος", "en": "📝 System Technical Specifications"},
+    "specs_arch_title": {"gr": "🧬 Αρχιτεκτονική Συστήματος", "en": "🧬 System Architecture"},
+    "specs_status_title": {"gr": "📊 Παρακολούθηση Κατάστασης", "en": "📊 Status Monitor"},
     "specs_python_version": {"gr": "Έκδοση Python", "en": "Python Version"},
-    "specs_session_cache": {"gr": "Cache Session", "en": "Session Cache"},
+    "specs_session_cache": {"gr": "Session Cache", "en": "Session Cache"},
     "specs_user_role": {"gr": "Ρόλος Χρήστη", "en": "User Role"},
     "specs_language": {"gr": "Γλώσσα", "en": "Language"},
+    "specs_access_denied": {"gr": "Άρνηση Πρόσβασης.", "en": "Access Denied."},
 
-    # --- UI HELP USER ---
-    "help_title": {"gr": "Βοήθεια Χρήσης", "en": "Help"},
-    "help_info": {"gr": "ℹ️ Οδηγός Χρήσης Mastro Nek AI", "en": "ℹ️ Mastro Nek AI User Guide"},
-    "help_chat_q": {"gr": "💬 Πώς χρησιμοποιώ το Chat;", "en": "💬 How do I use the Chat?"},
-    "help_chat_a": {"gr": "1. Πήγαινε στο μενού 'AI Συνομιλία'.\n2. Γράψε την ερώτησή σου στο κάτω μέρος.\n3. Μπορείς να ανεβάσεις φωτογραφίες ή PDF από το tab 'Ανέβασμα'.", "en": "1. Go to the 'AI Chat' menu.\n2. Type your question at the bottom.\n3. You can upload photos or PDFs from the 'Upload' tab."},
-    "help_manuals_q": {"gr": "🔎 Πώς βρίσκω Manuals;", "en": "🔎 How do I find Manuals?"},
-    "help_manuals_a": {"gr": "1. Πήγαινε στη 'Βιβλιοθήκη Manuals'.\n2. Γράψε το μοντέλο ή τη μάρκα στην αναζήτηση.\n3. Πάτα το Link για να ανοίξει το PDF.", "en": "1. Go to the 'Manuals Library'.\n2. Type the model or brand in the search bar.\n3. Click the Link to open the PDF."},
-    "help_organizer_q": {"gr": "🧠 Πώς λειτουργεί ο Organizer (Admin);", "en": "🧠 How does the Organizer (Admin) work?"},
-    "help_organizer_a": {"gr": "1. Πήγαινε στο 'AI Organizer' (μόνο Admin).\n2. Πάτα 'Έναρξη Αυτόματης Ταξινόμησης'.\n3. Το σύστημα θα διαβάσει τα ατακτοποίητα PDF και θα τα βάλει σε φακέλους αυτόματα.", "en": "1. Go to 'AI Organizer' (Admin only).\n2. Click 'Start Auto-Sorting'.\n3. The system will read unsorted PDFs and automatically place them into folders."}
+
+    # --- UI Help User ---
+    "help_title": {"gr": "❓ Κέντρο Βοήθειας", "en": "❓ Help Center"},
+    "help_guide_info": {"gr": "ℹ️ Οδηγός Χρήσης Mastro Nek AI", "en": "ℹ️ Mastro Nek AI User Guide"},
+    "help_chat_title": {"gr": "💬 Πώς χρησιμοποιώ το Chat;", "en": "💬 How do I use the Chat?"},
+    "help_chat_step1": {"gr": "1. Πήγαινε στο μενού 'AI Συνομιλία'.", "en": "1. Go to the 'AI Chat' menu."},
+    "help_chat_step2": {"gr": "2. Γράψε την ερώτησή σου στο κάτω μέρος.", "en": "2. Type your question at the bottom."},
+    "help_chat_step3": {"gr": "3. Μπορείς να ανεβάσεις φωτογραφίες ή PDF από το tab 'Upload'.", "en": "3. You can upload photos or PDFs from the 'Upload' tab."},
+    "help_manuals_title": {"gr": "🔎 Πώς βρίσκω Manuals;", "en": "🔎 How do I find Manuals?"},
+    "help_manuals_step1": {"gr": "1. Πήγαινε στη 'Βιβλιοθήκη Manuals'.", "en": "1. Go to the 'Manuals Library'."},
+    "help_manuals_step2": {"gr": "2. Γράψε το μοντέλο ή τη μάρκα στη μπάρα αναζήτησης.", "en": "2. Type the model or brand in the search bar."},
+    "help_manuals_step3": {"gr": "3. Πάτα το κουμπί 'Προβολή Manual' για να ανοίξει το PDF.", "en": "3. Click the 'View Manual' button to open the PDF."},
+    "help_organizer_title": {"gr": "🧠 Πώς λειτουργεί ο Organizer (Admin);", "en": "🧠 How does the Organizer work (Admin)?"},
+    "help_organizer_step1": {"gr": "1. Πήγαινε στο 'AI Organizer'.", "en": "1. Go to 'AI Organizer'."},
+    "help_organizer_step2": {"gr": "2. Πάτα 'Έναρξη AI Sorting'.", "en": "2. Click 'Start AI Sorting'."},
+    "help_organizer_step3": {"gr": "3. Το σύστημα θα διαβάσει τα ατακτοποίητα PDF και θα τα βάλει σε φακέλους αυτόματα.", "en": "3. The system will read unsorted PDFs and organize them into folders automatically."},
 }
 
 def get_text(key: str, lang: str = 'gr') -> str:
     """
-    Ανακτά τη μετάφραση για ένα συγκεκριμένο κλειδί και γλώσσα.
-    Εάν το κλειδί ή η γλώσσα δεν βρεθεί, επιστρέφει το κλειδί
-    ή ένα placeholder σφάλματος.
+    Ανακτά το μεταφρασμένο κείμενο για ένα δοσμένο κλειδί και γλώσσα.
+    Επιστρέφει το κλειδί αν δεν βρεθεί μετάφραση, για να μην σπάει η εφαρμογή.
     """
-    if key in LANGUAGE_PACK:
-        if lang in LANGUAGE_PACK[key]:
-            return LANGUAGE_PACK[key][lang]
-        else:
-            logging.warning(f"Language '{lang}' not found for key '{key}'. Using default 'gr'.")
-            return LANGUAGE_PACK[key].get('gr', f"[{key} - lang missing]")
-    else:
-        logging.warning(f"Key '{key}' not found in LANGUAGE_PACK.")
-        return f"[{key}]"
+    try:
+        return LANGUAGE_PACK[key][lang]
+    except KeyError:
+        # Fallback to English if Greek is missing, or default to key itself
+        if lang == 'gr' and key in LANGUAGE_PACK and 'en' in LANGUAGE_PACK[key]:
+            return LANGUAGE_PACK[key]['en']
+        return f"MISSING_TRANSLATION_{key}"

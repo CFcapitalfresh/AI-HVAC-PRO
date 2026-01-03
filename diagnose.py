@@ -1,228 +1,118 @@
 # -*- coding: utf-8 -*-
 """
-CORE MODULE: LANGUAGE PACK
---------------------------
-Provides multi-language support (Greek/English) for UI elements.
+STANDALONE SCRIPT: HVAC System Diagnosis
+---------------------------------------
+Provides a quick diagnostic check of the AI system and its dependencies.
+Rule 3: Modularity - Now leverages DiagnosticsService for core checks.
 """
 
-# The central dictionary containing all translations.
-# Each key corresponds to a UI element or message.
-# The value is another dictionary with 'gr' and 'en' translations.
-LANGUAGE_PACK = {
-    # --- General App ---
-    "app_title": {"gr": "Mastro Nek AI", "en": "Mastro Nek AI"},
-    "login_tab": {"gr": "Σύνδεση", "en": "Login"},
-    "register_tab": {"gr": "Εγγραφή", "en": "Register"},
-    "email_lbl": {"gr": "Email", "en": "Email"},
-    "pass_lbl": {"gr": "Κωδικός", "en": "Password"},
-    "btn_login": {"gr": "Σύνδεση", "en": "Login"},
-    "name_lbl": {"gr": "Όνομα", "en": "Name"},
-    "btn_register": {"gr": "Εγγραφή", "en": "Register"},
-    "reg_success": {"gr": "Η εγγραφή ολοκληρώθηκε! Περιμένετε την έγκριση.", "en": "Registration successful! Awaiting approval."},
-    "logout": {"gr": "Αποσύνδεση", "en": "Logout"},
-    "menu_header": {"gr": "Κεντρικό Μενού", "en": "Main Menu"},
-    "general_ui_error": {"gr": "Προέκυψε σφάλμα στην εμφάνιση: {error}", "en": "An error occurred in the UI: {error}"},
-    "db_init_success": {"gr": "Τοπική βάση δεδομένων (SQLite) αρχικοποιήθηκε.", "en": "Local database (SQLite) initialized."},
-    "db_init_fail": {"gr": "Αποτυχία αρχικοποίησης τοπικής βάσης δεδομένων.", "en": "Failed to initialize local database."},
-    "lic_activated": {"gr": "Άδεια χρήσης ενεργοποιήθηκε!", "en": "License activated!"},
-    "lic_expired": {"gr": "Η άδεια χρήσης έχει λήξει.", "en": "License expired."},
-    "lic_invalid": {"gr": "Μη έγκυρη άδεια χρήσης.", "en": "Invalid license."},
-    "lic_not_found": {"gr": "Δεν βρέθηκε άδεια χρήσης.", "en": "No license found."},
-    "lic_pending": {"gr": "Η άδεια είναι σε εκκρεμότητα.", "en": "License is pending."},
-    "lic_status_valid": {"gr": "Ενεργή", "en": "Active"},
-    "lic_status_expired": {"gr": "Ληγμένη", "en": "Expired"},
-    "lic_status_invalid": {"gr": "Μη Έγκυρη", "en": "Invalid"},
-    "lic_status_pending": {"gr": "Εκκρεμής", "en": "Pending"},
-    "lic_status_not_found": {"gr": "Δεν Βρέθηκε", "en": "Not Found"},
+import streamlit as st
+import os
+import sys
+import time
+import logging # Rule 4: Logging
+
+# Rule 3: Import DiagnosticsService for shared logic
+from services.diagnostics_logic import DiagnosticsService
+from core.language_pack import get_text # Rule 5: Multilingual support
+from core.config_loader import ConfigLoader # For API Key info message
+
+# Configure logging for this standalone script
+logger = logging.getLogger("Standalone_Diagnose")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
-    # --- Menu Items ---
-    "menu_dashboard": {"gr": "Πίνακας Ελέγχου", "en": "Dashboard"},
-    "menu_diagnostics": {"gr": "Διαγνωστικά", "en": "Diagnostics"}, 
-    "menu_chat": {"gr": "AI Chat", "en": "AI Chat"},
-    "menu_library": {"gr": "Βιβλιοθήκη Manuals", "en": "Manuals Library"},
-    "menu_clients": {"gr": "Πελατολόγιο", "en": "Clients"},
-    "menu_organizer": {"gr": "AI Organizer", "en": "AI Organizer"},
-    "menu_tools": {"gr": "Εργαλεία", "en": "Tools"},
-    "menu_admin": {"gr": "Διαχείριση", "en": "Admin"},
-    "menu_licensing": {"gr": "Διαχείριση Αδειών", "en": "Licensing Management"}, # NEW
+st.set_page_config(page_title="System Diagnosis", page_icon="🩺")
+lang = st.session_state.get('lang', 'gr') # Rule 6: Get language from session state if available
 
+st.title(f"🩺 {get_text('diag_title', lang)}")
+st.write(get_text('diag_subtitle', lang))
+st.divider()
 
-    # --- UI Diagnostics (Troubleshooting Wizard) ---
-    "diag_title": {"gr": "Διαγνωστικός Οδηγός", "en": "Diagnostic Guide"},
-    "diag_subtitle": {"gr": "Βήμα-προς-Βήμα αντιμετώπιση προβλημάτων", "en": "Step-by-step troubleshooting"},
-    "diag_start_new": {"gr": "Έναρξη Νέας Διάγνωσης", "en": "Start New Diagnosis"},
-    "diag_input_ph": {"gr": "Περιγράψτε το πρόβλημα (π.χ. 'Error E3', 'Δεν ψύχει')", "en": "Describe the problem (e.g. 'Error E3', 'Not cooling')"},
-    "diag_context": {"gr": "Ενεργό Context:", "en": "Active Context:"},
-    "diag_btn_create": {"gr": "Δημιουργία Πλάνου Διάγνωσης", "en": "Create Diagnosis Plan"},
-    "diag_spinner": {"gr": "Δημιουργία πλάνου από AI...", "en": "Generating plan by AI..."},
-    "diag_fail": {"gr": "Αδυναμία δημιουργίας πλάνου διάγνωσης.", "en": "Failed to generate diagnosis plan."},
-    "diag_step": {"gr": "Βήμα", "en": "Step"},
-    "diag_of": {"gr": "από", "en": "of"},
-    "diag_done": {"gr": "✅ Η διάγνωση ολοκληρώθηκε!", "en": "✅ Diagnosis complete!"},
-    "diag_btn_new": {"gr": "Νέα Διάγνωση", "en": "New Diagnosis"},
-    "diag_action": {"gr": "Ενέργεια:", "en": "Action:"},
-    "diag_question": {"gr": "Ερώτηση:", "en": "Question:"},
-    "diag_yes": {"gr": "✅ Ναι, Διορθώθηκε!", "en": "✅ Yes, Fixed!"},
-    "diag_solved_msg": {"gr": "Ωραία δουλειά! Το πρόβλημα λύθηκε.", "en": "Great job! Problem solved."},
-    "diag_no": {"gr": "➡️ Όχι, Συνέχεια", "en": "➡️ No, Continue"},
-    "diag_cancel": {"gr": "❌ Ακύρωση", "en": "❌ Cancel"},
-    "diag_plan_title": {"gr": "Αντιμετώπιση Προβλημάτων", "en": "Troubleshooting"}, # For the plan's subheader
+# Initialize DiagnosticsService (Rule 3)
+diag_service = DiagnosticsService()
 
-    # --- NEW: UI Diagnostics AI System Status Section (for both ui_diagnostics and standalone diagnose.py) ---
-    "diag_ai_section_title": {"gr": "Κατάσταση Συστήματος AI (Gemini)", "en": "AI System Status (Gemini)"},
-    "diag_api_libs_check": {"gr": "1. Έλεγχος Βιβλιοθηκών", "en": "1. Library Check"}, # NEW KEY
-    "diag_api_libs_found": {"gr": "Όλες οι βιβλιοθήκες (google-generativeai, pypdf, google.oauth2) βρέθηκαν.", "en": "All libraries (google-generativeai, pypdf, google.oauth2) found."}, # NEW KEY
-    "diag_api_libs_missing": {"gr": "Λείπει βιβλιοθήκη: {error}", "en": "Missing library: {error}"}, # NEW KEY
-    "diag_api_key_check": {"gr": "2. Έλεγχος Gemini API Key", "en": "2. Gemini API Key Check"}, # Changed from 1
-    "diag_api_key_found": {"gr": "Το API Key βρέθηκε ({masked_key})", "en": "API Key found ({masked_key})"},
-    "diag_api_key_not_found": {"gr": "Δεν βρέθηκε το GEMINI_KEY.", "en": "GEMINI_KEY not found."},
-    "diag_api_key_info": {"gr": "Βεβαιωθείτε ότι το 'GEMINI_KEY = YOUR_KEY' υπάρχει στο .streamlit/secrets.toml ή ως μεταβλητή περιβάλλοντος.", "en": "Ensure 'GEMINI_KEY = YOUR_KEY' is in .streamlit/secrets.toml or as an environment variable."},
-    "diag_ai_conn_test": {"gr": "3. Σύνδεση με Google AI (Ping Test)", "en": "3. Google AI Connection (Ping Test)"}, # Changed from 2
-    "diag_ai_conn_attempt": {"gr": "Προσπάθεια σύνδεσης με Google Servers", "en": "Attempting connection to Google Servers"},
-    "diag_ai_conn_success": {"gr": "Επιτυχία! Συνδέθηκε και βρήκε {count} διαθέσιμα μοντέλα.", "en": "Success! Connected and found {count} available models."},
-    "diag_ai_conn_fail": {"gr": "Αποτυχία Σύνδεσης: {error}. Το Κλειδί είναι λάθος ή μπλοκαρισμένο, ή δεν υπάρχει ίντερνετ.", "en": "Connection Failed: {error}. Key is incorrect/blocked, or no internet connection."},
-    "diag_ai_model_auto_detect": {"gr": "Αυτόματη Επιλογή Μοντέλου", "en": "Automatic Model Selection"}, # Not a main step in standalone diagnose.py, but useful message
-    "diag_ai_model_selected": {"gr": "Το σύστημα επέλεξε αυτόματα το μοντέλο: **{model_name}**", "en": "System automatically selected model: **{model_name}**"},
-    "diag_ai_model_selection_fail": {"gr": "Αποτυχία επιλογής μοντέλου. Χρησιμοποιείται fallback.", "en": "Failed to select a model. Using fallback."},
-    "diag_ai_test_run": {"gr": "4. Προσομοίωση Απάντησης (Test Run)", "en": "4. Response Simulation (Test Run)"}, # Changed from 4
-    "diag_ai_test_query": {"gr": "Στέλνω δοκιμαστική ερώτηση στο {model_name}...", "en": "Sending test query to {model_name}..."},
-    "diag_ai_test_resp_success": {"gr": "Το AI απάντησε: '{response_text}'", "en": "AI responded: '{response_text}'"},
-    "diag_ai_test_resp_empty": {"gr": "Το AI απάντησε αλλά το κείμενο ήταν κενό.", "en": "AI responded but the text was empty."},
-    "diag_ai_critical_error": {"gr": "Κρίσιμο σφάλμα: {error}", "en": "Critical error: {error}"},
-    "diag_ai_error_429": {"gr": "ΕΠΙΒΕΒΑΙΩΣΗ: Το πρόβλημα είναι το QUOTA (429). Το κλειδί έχει ξεπεράσει τα όρια.", "en": "CONFIRMED: Issue is QUOTA (429). Key has exceeded limits."},
-    "diag_ai_error_403": {"gr": "ΕΠΙΒΕΒΑΙΩΣΗ: Το κλειδί δεν είναι έγκυρο.", "en": "CONFIRMED: The key is not valid."},
-    "diag_ai_error_404": {"gr": "ΕΠΙΒΕΒΑΙΩΣΗ: Το μοντέλο δεν βρέθηκε. Δοκιμάστε να κάνετε update: pip install --upgrade google-generativeai.", "en": "CONFIRMED: Model not found. Try updating: pip install --upgrade google-generativeai."},
-    "diag_ai_error_unknown": {"gr": "Άγνωστο σφάλμα δικτύου/συστήματος.", "en": "Unknown network/system error."},
-    "diag_pdf_engine_check_title": {"gr": "5. Μηχανή PDF", "en": "5. PDF Engine"}, # NEW KEY (title for PDF section)
-    "diag_pdf_engine_success": {"gr": "Η βιβλιοθήκη PDF λειτουργεί σωστά.", "en": "PDF library works correctly."}, # NEW KEY
-    "diag_pdf_engine_fail": {"gr": "Πρόβλημα στη βιβλιοθήκη PDF.", "en": "Problem with PDF library."}, # NEW KEY
-    "diag_pdf_engine_error": {"gr": "Σφάλμα PDF: {error}", "en": "PDF error: {error}"}, # NEW KEY
-    "diag_complete_summary": {"gr": "Η διάγνωση συστήματος AI ολοκληρώθηκε.", "en": "AI system diagnosis complete."},
-    # --- END NEW: UI Diagnostics AI Status Section ---
+def status_write(msg, state="loading"):
+    """Helper function for consistent status messages."""
+    if state == "loading":
+        st.info(f"⏳ {msg}...")
+    elif state == "success":
+        st.success(f"✅ {msg}")
+    elif state == "error":
+        st.error(f"❌ {msg}")
+    elif state == "warning":
+        st.warning(f"⚠️ {msg}")
 
-    # --- UI Organizer ---
-    "org_desc": {"gr": "Το AI Organizer σαρώνει τα μη τακτοποιημένα PDF εγχειρίδια στο Google Drive και τα κατηγοριοποιεί αυτόματα σε φακέλους ανάλογα με την κατηγορία, τη μάρκα, το μοντέλο και τον τύπο του εγχειριδίου.", "en": "The AI Organizer scans unsorted PDF manuals in Google Drive and automatically categorizes them into folders by category, brand, model, and manual type."},
-    "org_start": {"gr": "Έναρξη Διαλογής Αρχείων", "en": "Start File Sorting"},
-    "org_log": {"gr": "Λίστα Ενεργειών", "en": "Action Log"},
+# --- AI System Status Section (Rule 3: Use DiagnosticsService for checks) ---
+st.subheader(get_text('diag_ai_section_title', lang))
 
-    # --- UI Admin Panel ---
-    "admin_title": {"gr": "Κέντρο Διαχείρισης", "en": "Admin Center"},
-    "admin_no_users": {"gr": "Δεν βρέθηκαν χρήστες στη βάση δεδομένων.", "en": "No users found in database."},
-    "admin_pending": {"gr": "Αιτήματα για Έγκριση", "en": "Pending Approvals"},
-    "admin_no_pending": {"gr": "Δεν υπάρχουν εκκρεμή αιτήματα.", "en": "No pending requests."},
-    "admin_btn_activate": {"gr": "Ενεργοποίηση", "en": "Activate"},
-    "admin_btn_delete": {"gr": "Διαγραφή", "en": "Delete"},
-    "admin_msg_active": {"gr": "Ο χρήστης ενεργοποιήθηκε", "en": "User activated"},
-    "admin_msg_del": {"gr": "Ο χρήστης διαγράφηκε", "en": "User deleted"},
-    "admin_all_users": {"gr": "Όλοι οι Χρήστες", "en": "All Users"},
-    "admin_all_users_cap": {"gr": "Εμφανίζει όλους τους εγγεγραμμένους χρήστες.", "en": "Displays all registered users."},
+# --- CHECK 1: Gemini API Key ---
+st.markdown(f"**{get_text('diag_api_key_check', lang)}**")
+key_check_result = diag_service.check_gemini_key()
+if key_check_result["status"] == "success":
+    status_write(get_text('diag_api_key_found', lang).format(masked_key=key_check_result['message']), "success")
+else:
+    status_write(get_text('diag_api_key_not_found', lang), "error")
+    st.info(get_text('diag_api_key_info', lang))
+    logger.error(f"API Key check failed: {key_check_result['message']}") # Rule 4
 
-    # --- UI Tech Specs ---
-    "specs_title": {"gr": "Τεχνικές Προδιαγραφές", "en": "Technical Specifications"}, # Διόρθωση από "Προδιαμορφώσεις"
-
-    # --- UI Help User ---
-    "help_title": {"gr": "Βοήθεια", "en": "Help"},
-
-    # --- UI Tools ---
-    "tool_btu_tab": {"gr": "Υπολογιστής BTU", "en": "BTU Calculator"},
-    "tool_conv_tab": {"gr": "Μετατροπέας Μονάδων", "en": "Unit Converter"},
-    "tool_pipe_tab": {"gr": "Οδηγός Σωληνώσεων", "en": "Piping Guide"},
-    "tool_area": {"gr": "Εμβαδόν Χώρου (m²)", "en": "Room Area (m²)"},
-    "tool_height": {"gr": "Ύψος (m)", "en": "Height (m)"},
-    "ins_good": {"gr": "Καλή", "en": "Good"},
-    "ins_avg": {"gr": "Μέτρια", "en": "Average"},
-    "ins_bad": {"gr": "Κακή", "en": "Bad"},
-    "sun_low": {"gr": "Χαμηλή", "en": "Low"},
-    "sun_med": {"gr": "Μέτρια", "en": "Medium"},
-    "sun_high": {"gr": "Υψηλή", "en": "High"},
-    "tool_insulation": {"gr": "Μόνωση", "en": "Insulation"},
-    "tool_sun": {"gr": "Έκθεση στον Ήλιο", "en": "Sun Exposure"},
-    "tool_calc_res": {"gr": "Απαιτούμενη Ισχύς", "en": "Required Power"},
-    "tool_rec": {"gr": "Προτεινόμενη μονάδα", "en": "Recommended unit"},
-    "pipe_liquid": {"gr": "Γραμμή Υγρού", "en": "Liquid Line"},
-    "pipe_gas": {"gr": "Γραμμή Αερίου", "en": "Gas Line"},
-
-    # --- UI Dashboard ---
-    "dash_welcome": {"gr": "Καλώς ήρθες", "en": "Welcome"},
-    "dash_subtitle": {"gr": "Το κέντρο ελέγχου σου για το AI", "en": "Your AI Control Center"},
-    "dash_quick": {"gr": "Γρήγορες Ενέργειες", "en": "Quick Actions"},
-    "dash_chat_card": {"gr": "AI Chat Assistant", "en": "AI Chat Assistant"},
-    "dash_chat_desc": {"gr": "Συνομίλησε με το AI για τεχνικά θέματα και βλάβες.", "en": "Chat with the AI for technical issues and faults."},
-    "dash_btn_chat": {"gr": "Έναρξη Chat", "en": "Start Chat"},
-    "dash_lib_card": {"gr": "Βιβλιοθήκη Manuals", "en": "Manuals Library"},
-    "dash_lib_desc": {"gr": "Βρες manuals, σχέδια και τεχνικά εγχειρίδια.", "en": "Find manuals, diagrams, and technical documents."},
-    "dash_btn_lib": {"gr": "Άνοιγμα Βιβλιοθήκης", "en": "Open Library"},
-    "dash_tool_card": {"gr": "Τεχνικά Εργαλεία", "en": "Technical Tools"},
-    "dash_tool_desc": {"gr": "Υπολογιστές BTU, μετατροπείς μονάδων και οδηγοί.", "en": "BTU calculators, unit converters, and guides."},
-    "dash_btn_tool": {"gr": "Άνοιγμα Εργαλείων", "en": "Open Tools"},
-    "dash_status": {"gr": "Κατάσταση Συστήματος: Όλα λειτουργούν άψογα.", "en": "System Status: All systems are operating flawlessly."},
-
-    # --- UI Licensing --- NEW LICENSING KEYS
-    "lic_page_title": {"gr": "Διαχείριση Άδειας Χρήσης", "en": "License Management"},
-    "lic_user_section_title": {"gr": "Η Άδειά Σου", "en": "Your License"},
-    "lic_status_label": {"gr": "Κατάσταση Άδειας:", "en": "License Status:"},
-    "lic_expiry_label": {"gr": "Ημερομηνία Λήξης:", "en": "Expiration Date:"},
-    "lic_enter_key": {"gr": "Εισάγετε Κλειδί Άδειας", "en": "Enter License Key"},
-    "lic_key_ph": {"gr": "XYZ-ABCD-1234-EFGH", "en": "XYZ-ABCD-1234-EFGH"},
-    "lic_btn_activate": {"gr": "Ενεργοποίηση Άδειας", "en": "Activate License"},
-    "lic_activation_success": {"gr": "Η άδεια σας ενεργοποιήθηκε επιτυχώς!", "en": "Your license has been activated successfully!"},
-    "lic_activation_fail": {"gr": "Αποτυχία ενεργοποίησης άδειας. Ελέγξτε το κλειδί.", "en": "License activation failed. Please check the key."},
-    "lic_admin_section_title": {"gr": "Διαχείριση Αδειών Διαχειριστή", "en": "Admin License Management"},
-    "lic_admin_user_email": {"gr": "Email Χρήστη", "en": "User Email"},
-    "lic_admin_current_role": {"gr": "Τρέχων Ρόλος", "en": "Current Role"},
-    "lic_admin_new_role": {"gr": "Νέος Ρόλος", "en": "New Role"},
-    "lic_admin_set_expiry": {"gr": "Ορισμός Λήξης", "en": "Set Expiry"},
-    "lic_admin_btn_update_role": {"gr": "Ενημέρωση Ρόλου", "en": "Update Role"},
-    "lic_admin_btn_revoke": {"gr": "Απενεργοποίηση", "en": "Deactivate"},
-    "lic_admin_role_updated": {"gr": "Ο ρόλος του χρήστη ενημερώθηκε.", "en": "User role updated."},
-    "lic_admin_activation_updated": {"gr": "Η άδεια χρήσης ενημερώθηκε.", "en": "License status updated."},
-    "lic_admin_error_update": {"gr": "Σφάλμα κατά την ενημέρωση.", "en": "Error during update."},
-    "lic_admin_all_licenses": {"gr": "Όλες οι Άδειες Χρήσης", "en": "All Licenses"},
-    "lic_admin_no_licenses": {"gr": "Δεν βρέθηκαν καταχωρημένες άδειες.", "en": "No registered licenses found."},
-    "lic_admin_filter_users": {"gr": "Φιλτράρισμα Χρηστών...", "en": "Filter Users..."},
-    "lic_admin_new_license_expiry": {"gr": "Ημερομηνία Λήξης Άδειας", "en": "License Expiry Date"},
-    "lic_admin_select_role": {"gr": "Επιλέξτε Ρόλο", "en": "Select Role"},
-    "lic_admin_role_active": {"gr": "Ενεργός", "en": "Active"},
-    "lic_admin_role_pending": {"gr": "Εκκρεμής", "en": "Pending"},
-    "lic_admin_role_admin": {"gr": "Διαχειριστής", "en": "Admin"},
-    "lic_admin_role_inactive": {"gr": "Ανενεργός", "en": "Inactive"},
-
-    # --- NEW: UI Chat Tabs & Upload Specific Messages ---
-    "chat_tab_text": {"gr": "Κείμενο", "en": "Text"},
-    "chat_tab_voice": {"gr": "Φωνή", "en": "Voice"},
-    "chat_tab_upload": {"gr": "Manual Upload", "en": "Manual Upload"},
-    "chat_voice_under_dev": {"gr": "🎧 Λειτουργία φωνητικής εντολής υπό ανάπτυξη...", "en": "🎧 Voice command feature under development..."},
-    "chat_upload_instructions": {"gr": "Ανεβάστε ένα PDF ή μια εικόνα για να το στείλετε στο AI.", "en": "Upload a PDF or image to send its content to the AI."},
-    "chat_uploaded_content_preview": {"gr": "Προεπισκόπηση περιεχομένου:", "en": "Content Preview:"},
-    "chat_send_manual_to_ai": {"gr": "Στείλε Manual στο AI", "en": "Send Manual to AI"},
-    "chat_load_first_manual": {"gr": "Φόρτωσε πρώτο Manual από Βιβλιοθήκη", "en": "Load first Manual from Library"},
-    "chat_no_manuals_in_lib": {"gr": "Δεν βρέθηκαν manuals στη βιβλιοθήκη.", "en": "No manuals found in library."},
-    "chat_error_loading_manual": {"gr": "Σφάλμα φόρτωσης manual από βιβλιοθήκη.", "en": "Error loading manual from library."},
-    "chat_image_ocr_warning": {"gr": "⚠️ Το AI θα λάβει τη φωτογραφία, αλλά η εξαγωγή κειμένου (OCR) είναι περιορισμένη.", "en": "⚠️ The AI will receive the image, but text extraction (OCR) is limited."},
-    "chat_file_too_large": {"gr": "Το αρχείο είναι πολύ μεγάλο για επεξεργασία κειμένου.", "en": "File is too large for text processing."},
-    "chat_manual_query_ph": {"gr": "Πες στο AI τι να κάνει με το manual...", "en": "Tell the AI what to do with the manual..."},
-
-
-}
-
-def get_text(key: str, lang: str = 'gr') -> str:
-    """
-    Ανακτά το μεταφρασμένο κείμενο για ένα δεδομένο κλειδί και γλώσσα.
-
-    Args:
-        key (str): Το κλειδί του κειμένου (π.χ. 'app_title').
-        lang (str): Η γλώσσα ('gr' για Ελληνικά, 'en' για Αγγλικά).
-
-    Returns:
-        str: Το μεταφρασμένο κείμενο ή ένα μήνυμα σφάλματος αν το κλειδί δεν βρεθεί.
-    """
-    # Προστατευτικός έλεγχος για να αποφύγουμε KeyErrors
-    if key in LANGUAGE_PACK:
-        if lang in LANGUAGE_PACK[key]:
-            return LANGUAGE_PACK[key][lang]
-        else:
-            # Fallback στη default γλώσσα (Ελληνικά) αν η ζητούμενη δεν υπάρχει
-            return LANGUAGE_PACK[key].get('gr', f"Missing '{lang}' translation for key '{key}'")
+# --- CHECK 2: Google AI Connection (Ping Test) ---
+st.markdown(f"**{get_text('diag_ai_conn_test', lang)}**")
+if diag_service.api_key:
+    status_write(get_text('diag_ai_conn_attempt', lang))
+    conn_check_result = diag_service.test_ai_connection()
+    if conn_check_result["status"] == "success":
+        status_write(get_text('diag_ai_conn_success', lang).format(count=conn_check_result['message'].split(' ')[0]), "success")
+        st.info(get_text('diag_ai_model_selected', lang).format(model_name=diag_service.ai_engine.model.model_name if diag_service.ai_engine.model else "N/A"))
     else:
-        return f"MISSING_TEXT_KEY[{key}]"
+        status_write(get_text('diag_ai_conn_fail', lang).format(error=conn_check_result['message']), "error")
+        st.error(get_text('diag_ai_conn_fail_info', lang))
+        logger.error(f"Google AI connection failed: {conn_check_result['message']}") # Rule 4
+else:
+    status_write(get_text('diag_ai_conn_fail', lang).format(error=get_text('diag_api_key_not_found', lang)), "error")
+
+# --- CHECK 3: Automatic Model Selection ---
+st.markdown(f"**{get_text('diag_ai_model_auto_detect', lang)}**")
+selected_model_name = diag_service._get_best_model_name_internal() # Use internal method
+if selected_model_name:
+    st.info(get_text('diag_ai_model_selected', lang).format(model_name=selected_model_name))
+else:
+    status_write(get_text('diag_ai_model_selection_fail', lang), "error")
+    logger.error("Failed to select an AI model.") # Rule 4
+
+# --- CHECK 4: Simulation (Generation) ---
+st.markdown(f"**{get_text('diag_ai_test_run', lang)}**")
+if diag_service.api_key and diag_service.model:
+    status_write(get_text('diag_ai_test_query', lang).format(model_name=diag_service.model.model_name))
+    gen_check_result = diag_service.test_ai_generation()
+    if gen_check_result["status"] == "success":
+        status_write(get_text('diag_ai_test_success', lang).format(response=gen_check_result['message']), "success")
+    elif gen_check_result["status"] == "warning":
+        status_write(get_text('diag_ai_test_empty_response', lang), "warning")
+    else: # error
+        status_write(get_text('diag_ai_test_error', lang).format(error=gen_check_result['message']), "error")
+        if "Quota Exceeded" in gen_check_result['message']:
+            st.error(get_text('diag_ai_quota_exceeded', lang))
+        elif "Invalid API Key" in gen_check_result['message']:
+            st.error(get_text('diag_ai_key_invalid', lang))
+        elif "Model not found" in gen_check_result['message']:
+            st.error(get_text('diag_ai_model_not_found', lang))
+        else:
+            st.error(get_text('diag_ai_unknown_error', lang))
+        logger.error(f"AI generation test failed: {gen_check_result['message']}") # Rule 4
+else:
+    status_write(get_text('diag_ai_test_error', lang).format(error="AI not configured or model not selected."), "error")
+
+
+# --- CHECK 5: PDF Engine (pypdf) ---
+st.markdown(f"**{get_text('diag_pdf_test', lang)}**")
+pdf_check_result = diag_service.check_pdf_engine()
+if pdf_check_result["status"] == "success":
+    status_write(get_text('diag_pdf_read_success', lang), "success")
+else:
+    status_write(get_text('diag_pdf_read_fail', lang).format(error=pdf_check_result['message']), "error")
+    logger.error(f"PDF engine check failed: {pdf_check_result['message']}") # Rule 4
+
+st.write("\n")
+st.success(get_text('diag_done', lang)) # Use get_text
+st.write(get_text('diag_system_ready_text', lang)) # NEW KEY (if needed)

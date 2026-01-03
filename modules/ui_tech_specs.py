@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 from core.language_pack import get_text
+from version import VERSION # NEW: Import version for display
 
 def render(user):
     # Security Check: Μόνο Admin
@@ -8,23 +9,25 @@ def render(user):
         st.error("Access Denied.")
         return
 
-    st.header(get_text('specs_title', st.session_state.lang))
+    lang = st.session_state.get('lang', 'gr') # Rule 6
+    st.header(get_text('specs_title', lang)) # Rule 5
     
-    st.markdown("### 🧬 System Architecture")
-    st.code("""
+    st.markdown(f"### 🧬 {get_text('specs_architecture', lang)}") # Rule 5
+    st.code(f"""
+    Application Version: {VERSION}
     Architecture: Modular Monolith
-    Core: Python 3.x + Streamlit
-    Database: Google Sheets (via Service Account)
+    Core: Python {sys.version.split()[0]} + Streamlit
+    Database: Google Sheets (via Service Account), SQLite (local)
     Storage: Google Drive API v3
-    AI Engine: Google Gemini 1.5 Flash
+    AI Engine: Google Gemini 1.5 Flash (Auto-selected)
     """, language="yaml")
     
-    st.markdown("### 📊 Status Monitor")
+    st.markdown(f"### 📊 {get_text('specs_status_monitor', lang)}") # Rule 5
     c1, c2 = st.columns(2)
     with c1:
-        st.metric("Python Version", sys.version.split()[0])
-        st.metric("Session Cache", f"{len(st.session_state)} Objects")
+        st.metric(get_text('specs_python_version', lang), sys.version.split()[0]) # Rule 5
+        st.metric(get_text('specs_session_cache', lang), f"{len(st.session_state)} Objects") # Rule 5
     
     with c2:
-        st.metric("User Role", user['role'].upper())
-        st.metric("Language", st.session_state.lang.upper())
+        st.metric(get_text('specs_user_role', lang), user['role'].upper()) # Rule 5
+        st.metric(get_text('specs_language', lang), st.session_state.lang.upper()) # Rule 5

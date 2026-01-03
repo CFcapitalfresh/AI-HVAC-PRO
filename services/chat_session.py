@@ -2,6 +2,7 @@
 SERVICE: CHAT SESSION (INTENT AWARE)
 ------------------------------------
 Sorts manuals based on user query keywords.
+Handles file uploads and AI interaction.
 """
 import streamlit as st
 from services.sync_service import SyncService
@@ -20,8 +21,14 @@ class ChatSessionService:
         self.sync = SyncService()
         self.drive = DriveManager()
         self.ai_engine = AIEngine()
+        # Rule 6: Ensure library_cache is initialized once
         if 'library_cache' not in st.session_state:
-            st.session_state.library_cache = self.sync.load_index()
+            try:
+                st.session_state.library_cache = self.sync.load_index()
+                logger.info("Library cache loaded during ChatSessionService init.")
+            except Exception as e:
+                logger.error(f"Failed to load library cache in ChatSessionService: {e}", exc_info=True)
+                st.session_state.library_cache = [] # Ensure it's a list even on error
         logger.info("ChatSessionService initialized.")
 
     def get_brands(self) -> List[str]:
@@ -106,83 +113,148 @@ class ChatSessionService:
 
         return score
 
-    def get_manual_text_content(self, file_id: str) -> Optional[str]:
-        """Κατεβάζει ένα manual από το Drive και εξάγει το κείμενο."""
+    def _extract_text_from_pdf_stream(self, file_bytes: bytes) -> Optional[str]:
+        """Utility function to extract text from a PDF byte stream."""
+        try:
+            reader = PdfReader(io.BytesIO(file_bytes))
+            text = ""
+            # Extract text from first few pages to limit token usage for AI
+            for i in range(min(5, len(reader.pages))): # Process first 5 pages
+                page_text = reader.pages[i].extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            return text
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF stream: {e}", exc_info=True)
+            return None
+
+    def _process_uploaded_file_for_ai(self, uploaded_file: Any) -> Optional[Dict[str, Any]]:
+        """
+        Επεξεργάζεται ένα Streamlit UploadedFile object για χρήση από το AI.
+        Επιστρέφει ένα dictionary με το `mime_type` και τα `parts` για το AI.
+        """
+        try:
+            file_bytes = uploaded_file.getvalue()
+            mime_type = uploaded_file.type
+            
+            if "pdf" in mime_type:
+                # Για PDF, εξάγουμε κείμενο και το στέλνουμε ως text_part
+                text_content = self._extract_text_from_pdf_stream(file_bytes)
+                if text_content:
+                    return {"mime_type": mime_type, "parts": [
+                        {"text": f"Uploaded PDF: {uploaded_file.name}\nContent:\n{text_content}"}
+                    ]}
+                else:
+                    logger.warning(f"Could not extract text from PDF: {uploaded_file.name}")
+                    return None
+            elif "image" in mime_type:
+                # Για εικόνες, το στέλνουμε ως encoded image part
+                return {"mime_type": mime_type, "parts": [
+                    {"image": file_bytes}
+                ]}
+            else:
+                logger.warning(f"Unsupported uploaded file type: {mime_type} for {uploaded_file.name}")
+                return None
+        except Exception as e:
+            logger.error(f"Error processing uploaded file {uploaded_file.name}: {e}", exc_info=True)
+            return None
+
+    def get_manual_content_from_id(self, file_id: str) -> Optional[str]: 
+        """
+        Κατεβάζει ένα manual από το Drive και εξάγει το κείμενο.
+        """
         try:
             file_stream = self.drive.download_file_content(file_id)
             if file_stream:
-                reader = PdfReader(file_stream)
-                text = ""
-                for page in reader.pages:
-                    text += page.extract_text() or ""
-                return text
+                file_bytes = file_stream.getvalue()
+                return self._extract_text_from_pdf_stream(file_bytes)
             return None
         except Exception as e:
             logger.error(f"Error extracting text from PDF (file ID: {file_id}): {e}", exc_info=True)
             return None
 
-    def handle_manual_upload(self, uploaded_file, brand, model) -> Optional[str]:
+    def process_chat_input(
+        self, 
+        user_query: str, 
+        selected_brand: str, 
+        selected_model: str, 
+        uploaded_pdfs: List[Any], 
+        uploaded_images: List[Any], 
+        history: List[Dict[str, Any]], 
+        lang: str,
+        user_email: str
+    ) -> str:
         """
-        Ανεβάζει ένα αρχείο στο Drive και επιστρέφει το ID του.
-        (UNUSED IN CURRENT UI, KEPT FOR POTENTIAL FUTURE USE OR AI-DIRECTED UPLOAD)
+        Επεξεργάζεται την είσοδο του χρήστη, συμπεριλαμβανομένων των ανεβασμένων αρχείων,
+        και αλληλεπιδρά με το AI Engine.
+        Args:
+            user_query: Το κείμενο της ερώτησης του χρήστη.
+            selected_brand: Η επιλεγμένη μάρκα για context.
+            selected_model: Το επιλεγμένο μοντέλο για context.
+            uploaded_pdfs: Λίστα με Streamlit UploadedFile objects για PDF.
+            uploaded_images: Λίστα με Streamlit UploadedFile objects για εικόνες.
+            history: Ιστορικό συνομιλίας.
+            lang: Τρέχουσα γλώσσα.
+            user_email: Email χρήστη για logging.
+        Returns:
+            Η απάντηση του AI.
         """
-        root_id = self.drive.root_id
-        if not root_id:
-            logger.error("Root Drive folder ID is not configured.")
-            return None
-        
-        # Create a structured name for the uploaded file
-        safe_name = f"User_Uploads | {brand or 'Unknown'} | {model or 'Generic'} | {uploaded_file.name}"
-        try:
-            file_id = self.drive.upload_stream(uploaded_file, safe_name, root_id)
-            return file_id
-        except Exception as e:
-            logger.error(f"Failed to upload user file '{uploaded_file.name}' to Drive: {e}", exc_info=True)
-            return None
+        all_content_parts = []
+        manual_context_text = ""
 
-    def get_ai_response(self, user_prompt: Optional[str], uploaded_files: List[Any], 
-                        manual_contexts: List[str], chat_history: List[Dict[str, str]], lang: str) -> str:
-        """
-        Επικοινωνεί με το AI Engine για να λάβει απάντηση,
-        συμπεριλαμβάνοντας κείμενο, ανεβασμένα αρχεία και manual contexts.
-        """
-        content_parts = []
+        # 1. Προσθήκη ιστορικού συνομιλίας ως content parts
+        for msg in history:
+            all_content_parts.append({"text": f"{msg['role']}: {msg['content']}"})
 
-        # Add chat history as text parts for context
-        for msg in chat_history:
-            content_parts.append({"text": f"{msg['role']}: {msg['content']}"})
+        # 2. Επεξεργασία ανεβασμένων αρχείων (Rule 2)
+        if uploaded_pdfs or uploaded_images:
+            for file in uploaded_pdfs + uploaded_images:
+                file_ai_parts = self._process_uploaded_file_for_ai(file)
+                if file_ai_parts:
+                    all_content_parts.extend(file_ai_parts["parts"])
+                    logger.info(f"Processed uploaded file '{file.name}' for AI.")
+                else:
+                    logger.warning(f"Skipping unsupported/unreadable uploaded file: {file.name}")
 
-        # Add the current user prompt
-        if user_prompt:
-            content_parts.append({"text": f"user: {user_prompt}"})
-
-        # Add uploaded files (images & PDFs)
-        for uploaded_file in uploaded_files:
-            file_type = uploaded_file.type
-            file_bytes = uploaded_file.getvalue()
+        # 3. Εύρεση και προσθήκη manuals από τη βιβλιοθήκη
+        if selected_brand and selected_brand != "-":
+            prioritized_manuals = self.get_prioritized_manuals(selected_brand, selected_model, user_query)
             
-            if "image" in file_type:
-                img = Image.open(io.BytesIO(file_bytes))
-                content_parts.append(img) # AI Engine expects PIL Image directly
-            elif "pdf" in file_type:
-                # For PDFs, extract text and send as text_part (or directly as bytes for Vision if supported)
-                # Current AIEngine expects file-like objects for direct PDF parsing
-                content_parts.append(io.BytesIO(file_bytes)) # Pass as bytes stream for direct AI parsing
-            else:
-                logger.warning(f"Unsupported file type uploaded: {file_type}")
-        
-        # Add manual contexts
-        if manual_contexts:
-            context_text = "\n\n--- MANUAL CONTEXT ---\n" + "\n\n".join(manual_contexts)
-            content_parts.append({"text": context_text})
-            logger.info(f"AI Call: Added {len(manual_contexts)} manual contexts.")
-
-        try:
-            if not content_parts: # Should not happen if prompt or files are present
-                return "Παρακαλώ δώστε μια ερώτηση ή ανεβάστε αρχείο."
+            # Λήψη περιεχομένου από τα κορυφαία manuals (π.χ., τα πρώτα 3)
+            for manual in prioritized_manuals[:3]: # Limit to top 3 to control token usage
+                try:
+                    manual_content = self.get_manual_content_from_id(manual['file_id'])
+                    if manual_content:
+                        manual_context_text += f"\n\n--- MANUAL: {manual['name']} ---\n{manual_content[:5000]}" # Limit manual text
+                        logger.info(f"Added manual '{manual['name']}' to AI context.")
+                except Exception as e:
+                    logger.error(f"Error getting manual content for {manual.get('name', 'N/A')}: {e}", exc_info=True)
             
-            response = self.ai_engine.get_chat_response(content_parts, lang=lang)
+            if manual_context_text:
+                all_content_parts.append({"text": f"\n\n--- Relevant Manuals Context ---\n{manual_context_text}"})
+
+
+        # 4. Προσθήκη του ερωτήματος του χρήστη
+        all_content_parts.append({"text": user_query})
+
+        # 5. Κλήση του AI Engine
+        try:
+            response = self.ai_engine.get_chat_response(
+                content_parts=all_content_parts, 
+                lang=lang, 
+                manual_file_content=manual_context_text # Pass directly here
+            )
+            # Log successful interaction (Rule 4)
+            # Assuming AuthManager.log_interaction exists and uses DBConnector.append_data
+            try:
+                from core.auth_manager import AuthManager
+                AuthManager.log_interaction(user_email, "AI Chat Query", user_query[:100])
+            except ImportError:
+                logger.warning("AuthManager not available for logging chat interaction.")
+            except Exception as e:
+                logger.error(f"Failed to log chat interaction for {user_email}: {e}", exc_info=True)
+
             return response
         except Exception as e:
-            logger.error(f"Error getting AI response in ChatSessionService: {e}", exc_info=True)
-            return f"❌ Σφάλμα επικοινωνίας με το AI: {e}"
+            logger.error(f"AI Engine chat response failed: {e}", exc_info=True) # Rule 4
+            return f"❌ AI Engine Error: {e}"

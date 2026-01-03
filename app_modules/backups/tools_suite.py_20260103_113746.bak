@@ -2,11 +2,6 @@
 MODULE: Tools Suite & Clients
 VERSION: 1.5.0 (TITANIUM)
 DESCRIPTION: Περιέχει τα υπολογιστικά εργαλεία και την προβολή πελατολογίου.
-             **Αυτό το module φαίνεται να είναι πλέον ΑΝΕΝΕΡΓΟ/REDUNDANT, καθώς το `main.py`
-             χρησιμοποιεί `modules/ui_tools.py` και `modules/ui_clients.py` ξεχωριστά
-             για τις αντίστοιχες λειτουργίες.**
-             Εάν υπάρχουν μοναδικές λειτουργίες εδώ, θα πρέπει να μεταφερθούν στα `modules/ui_tools.py`
-             και `modules/ui_clients.py`.
 """
 
 import streamlit as st

@@ -125,92 +125,87 @@ def main():
                 submitted = st.form_submit_button(get_text('btn_register', lang))
 
                 if submitted:
-                    # COMPLETE: Implement user registration logic
-                    success = AuthManager.register_new_user(reg_email, reg_name, reg_password)
-                    if success:
-                        st.success(get_text('reg_success', lang))
-                        logger.info(f"New user '{reg_email}' registered successfully (pending approval).")
-                    else:
-                        st.error(get_text('reg_fail', lang))
-                        logger.warning(f"Registration failed for '{reg_email}'.")
-        return # Important to return after login/register
+                    # COMPLETE: AuthManager.register_new_user call
+                    try:
+                        if AuthManager.register_new_user(reg_email, reg_name, reg_password):
+                            st.success(get_text('reg_success', lang))
+                            logger.info(f"User {reg_email} registered successfully as 'pending'.")
+                        else:
+                            st.error(get_text('reg_fail', lang))
+                            logger.warning(f"Registration failed for {reg_email}.")
+                    except Exception as e:
+                        st.error(f"{get_text('general_ui_error', lang).format(error=e)}")
+                        logger.error(f"Registration UI Error: {e}", exc_info=True)
+        return # IMPORTANT: exit after login/register if user not authenticated
     
-    # --- ΚΥΡΙΩΣ ΕΦΑΡΜΟΓΗ ---
-    # Sidebar Navigation (μόνο αφού ο χρήστης έχει συνδεθεί)
-    with st.sidebar:
-        st.image("assets/nek_logo.png", use_column_width=True, class_name="logo-img") # Ensure logo is in 'assets' folder
-        st.subheader(get_text('menu_header', lang))
+    # --- ΚΥΡΙΩΣ ΠΕΡΙΒΑΛΛΟΝ ΕΦΑΡΜΟΓΗΣ (Μετά τη σύνδεση) ---
+    st.sidebar.image("assets/logo.png", use_column_width=True, caption=f"Mastro Nek AI {VERSION}")
 
-        menu_items = {
-            "Dashboard": ui_dashboard,
-            "Diagnostics": ui_diagnostics,
-            "AI Chat": ui_chat,
-            "Manuals Library": ui_search,
-            "Client CRM": ui_clients,
-            "AI Organizer": ui_organizer,
-            "Tools": ui_tools,
-            "Admin Panel": ui_admin_panel,
-            "Tech Specs": ui_tech_specs,
-            "Licensing": ui_licensing,
-            "Help": ui_help_user
-        }
-        
-        # Mapping menu keys to their translated texts
-        translated_menu_items = {get_text(f"menu_{k.lower().replace(' ', '_')}", lang): k for k in menu_items.keys()}
-
-        # Display selected page from session state or default to Dashboard
-        current_page_key = st.session_state.page
-        if current_page_key not in menu_items:
-            current_page_key = "Dashboard" # Fallback if page key is invalid
-
-        # Selectbox for navigation
-        selected_menu_translated = st.selectbox(
-            get_text('menu_header', lang),
-            options=list(translated_menu_items.keys()),
-            index=list(translated_menu_items.keys()).index(get_text(f"menu_{current_page_key.lower().replace(' ', '_')}", lang)),
-            key="main_menu_selector"
-        )
-        
-        # Update session state with the actual English key
-        selected_page_english_key = translated_menu_items[selected_menu_translated]
-        if st.session_state.page != selected_page_english_key:
-            st.session_state.page = selected_page_english_key
-            st.rerun() # Rerun to switch page
-
-        # Language Selector for main app (moved from login section)
-        st.divider()
-        st.markdown(f"**🌐 {get_text('lang_selector_title', lang)}**")
-        selected_lang = st.selectbox(
-            "",
-            options=["Ελληνικά", "English"],
-            index=0 if st.session_state.lang == 'gr' else 1,
-            key="app_lang_selector_sidebar"
-        )
-        new_lang = 'gr' if selected_lang == "Ελληνικά" else 'en'
-        if new_lang != st.session_state.lang:
-            st.session_state.lang = new_lang
-            logger.info(f"Language changed to: {new_lang}")
+    # Γλώσσα στο Sidebar
+    # Move language selection to a more prominent/accessible place if desired, or keep here.
+    c_lang_side = st.sidebar.container()
+    with c_lang_side:
+        lang_sel_side = st.selectbox("🌐 Language", ["Ελληνικά", "English"], index=0 if lang=='gr' else 1, key="sidebar_lang_selector")
+        if (st.session_state.lang == 'gr' and lang_sel_side == "English") or \
+           (st.session_state.lang == 'en' and lang_sel_side == "Ελληνικά"):
+            st.session_state.lang = 'gr' if lang_sel_side == "Ελληνικά" else 'en'
             st.rerun()
 
-        # Logout button
-        if st.button(get_text('logout', lang)):
-            user_email = st.session_state.user_info['email'] if st.session_state.user_info else "N/A"
-            logger.info(f"User {user_email} logged out.")
-            st.session_state.user_info = None
-            st.session_state.messages = [] # Clear chat history on logout
-            st.session_state.page = "Dashboard" # Reset page
-            sync_current_spy_logs_to_drive() # Upload logs on logout
-            st.rerun()
-            
-        st.caption(f"App Version: {VERSION}")
+    # Μενού Πλοήγησης
+    st.sidebar.title(get_text('menu_header', lang))
+    
+    menu_options = {
+        "Dashboard": ui_dashboard,
+        "AI Chat": ui_chat,
+        "Manuals Library": ui_search,
+        "Diagnostics": ui_diagnostics,
+        "Clients": ui_clients,
+        "AI Organizer": ui_organizer,
+        "Tools": ui_tools,
+        "Tech Specs": ui_tech_specs, # NEW MENU ITEM
+        "Help": ui_help_user, # NEW MENU ITEM
+        "Licensing Management": ui_licensing, # NEW MENU ITEM
+        "Admin": ui_admin_panel,
+    }
 
-    # Render the selected page
+    # Μεταφρασμένες επιλογές
+    translated_options = {get_text(f"menu_{k.lower().replace(' ', '_')}", lang): k for k in menu_options.keys()}
+    
+    # Check user role for admin panel access
+    if st.session_state.user_info and st.session_state.user_info.get('role') != 'admin':
+        # Remove Admin, Licensing, Tech Specs for non-admin users
+        for key_to_remove in ["Admin", "Licensing Management", "Tech Specs", "AI Organizer"]: # AI Organizer also admin-only
+            if get_text(f"menu_{key_to_remove.lower().replace(' ', '_')}", lang) in translated_options:
+                del translated_options[get_text(f"menu_{key_to_remove.lower().replace(' ', '_')}", lang)]
+
+    # Streamlit Navigation
+    selected_page_translated = st.sidebar.radio(
+        "",
+        list(translated_options.keys()),
+        index=list(translated_options.keys()).index(get_text(f"menu_{st.session_state.page.lower().replace(' ', '_')}", lang)) if get_text(f"menu_{st.session_state.page.lower().replace(' ', '_')}", lang) in translated_options else 0,
+        key="main_menu_radio"
+    )
+    st.session_state.page = translated_options[selected_page_translated] # Store original page name
+
+    # Αποσύνδεση
+    if st.sidebar.button(get_text('logout', lang), use_container_width=True):
+        sync_current_spy_logs_to_drive() # Συγχρονισμός logs πριν την αποσύνδεση
+        st.session_state.user_info = None
+        st.session_state.page = "Dashboard" # Επαναφορά στην αρχική σελίδα
+        st.session_state.messages = [] # Καθαρισμός ιστορικού συνομιλίας
+        st.session_state.spy_logs = [] # Clear spy logs from session
+        logger.info("User logged out.")
+        st.rerun()
+
+    # Dynamic UI rendering based on selected page
     try:
-        current_page_module = menu_items[st.session_state.page]
-        current_page_module.render(st.session_state.user_info)
+        if st.session_state.page in menu_options:
+            menu_options[st.session_state.page].render(st.session_state.user_info)
+        else:
+            ui_dashboard.render(st.session_state.user_info) # Fallback to dashboard
     except Exception as e:
-        logger.error(f"Error rendering page '{st.session_state.page}': {e}", exc_info=True)
+        logger.error(f"UI Rendering Error for page {st.session_state.page}: {e}", exc_info=True)
         st.error(f"{get_text('general_ui_error', lang).format(error=e)}")
-
+    
 if __name__ == "__main__":
     main()

@@ -1,0 +1,159 @@
+"""
+MODULE: Search Engine System
+VERSION: 2.2.0 (TITANIUM - IMPROVED STT Integration)
+DESCRIPTION: Μηχανή αναζήτησης στα Manuals της μνήμης (Session State).
+ENHANCEMENT: Integrated Speech-to-Text Button Placeholder that updates search input.
+"""
+
+import streamlit as st
+import logging
+from typing import List, Dict, Any
+
+# Import Speech-to-Text library with graceful error handling (Rule 1)
+try:
+    from streamlit_mic_recorder import mic_recorder
+except ImportError:
+    mic_recorder = None
+
+from core.language_pack import get_text # Rule 5
+
+logger = logging.getLogger("Module_Search")
+
+def _get_badge_color(meta_type: str) -> str:
+    """Helper Function: Επιστρέφει χρώμα ανάλογα με τον τύπο εγγράφου."""
+    if not meta_type: return "gray"
+    meta = meta_type.upper()
+    if "ERROR" in meta: return "red"
+    if "SERVICE" in meta: return "orange"
+    if "USER" in meta: return "green"
+    if "INSTALL" in meta: return "blue"
+    if "TECHNICAL" in meta: return "violet"
+    if "SPARE" in meta: return "yellow"
+    if "OTHER" in meta or "GENERAL" in meta or "DOC" in meta: return "gray"
+    return "gray"
+
+def render_search_page(library_data: List[Dict[str, Any]]) -> None:
+    """
+    Εμφανίζει τη σελίδα αναζήτησης.
+    Args:
+        library_data: Η λίστα με τα manuals από το st.session_state['library_cache']
+    """
+    lang = st.session_state.get('lang', 'gr') # Rule 5
+    st.header(get_text('menu_library', lang)) # Use get_text
+    st.caption("Enterprise Indexing System | Google Drive Integration")
+
+    # 1. Έλεγχος Δεδομένων
+    if not library_data:
+        st.warning(get_text('lib_empty_warning', lang)) # Use get_text
+        st.info(get_text('lib_sync_info', lang)) # Use get_text
+        return
+
+    # 2. Στατιστικά (Collapsible)
+    with st.expander(f"📊 {get_text('lib_stats_header', lang)} ({len(library_data)} {get_text('lib_documents', lang)})", expanded=False): # Use get_text
+        unique_brands = sorted(list(set(item.get('brand', 'Unknown') for item in library_data if item.get('brand', 'Unknown') != 'UNKNOWN')))
+        st.write(f"**{get_text('lib_brands', lang)}:** {', '.join(unique_brands[:10])}{'...' if len(unique_brands) > 10 else ''}") # Use get_text
+        unique_types = sorted(list(set(item.get('meta_type', 'DOC') for item in library_data if item.get('meta_type', 'DOC') != 'DOC')))
+        st.write(f"**{get_text('lib_doc_types', lang)}:** {', '.join(unique_types[:10])}{'...' if len(unique_types) > 10 else ''}") # Use get_text
+        # Add filtering options if desired in future, e.g., multiselect for brand/type
+
+    # 3. Μπάρα Αναζήτησης με Φωνητική Εντολή
+    search_col, stt_col = st.columns([8, 1])
+    
+    # Rule 6: Control initialization keys for search input
+    if "library_search_input_text" not in st.session_state:
+        st.session_state.library_search_input_text = ""
+
+    with search_col:
+        # Use st.session_state.library_search_input_text for text_input value
+        query = st.text_input(get_text('search_bar_placeholder', lang), # Use get_text
+                             placeholder=get_text('search_bar_example', lang), # Use get_text
+                             key="library_search_input",
+                             value=st.session_state.library_search_input_text).strip().lower()
+        # Update session state if user typed
+        st.session_state.library_search_input_text = query
+    
+    with stt_col:
+        st.write("") # Για ευθυγράμμιση
+        st.write("")
+        # Rule 1: Microphone/Audio button
+        if mic_recorder:
+            audio_bytes = mic_recorder(start_prompt="🎤", stop_prompt="⏹️", key="search_stt_button")
+            if audio_bytes:
+                st.info(get_text('audio_received_msg', lang)) # Use get_text
+                # Placeholder for actual Speech-to-Text integration
+                # In a real application, this would call a STT service
+                # For now, we simulate by updating the search input with a message
+                st.session_state.library_search_input_text = f"Voice input received for '{get_text('search_bar_placeholder', lang)}'" # Placeholder text
+                st.rerun() # Re-run to update search input field
+        else:
+            # Fallback if mic_recorder is not available
+            st.button("🎤", key="stt_button_placeholder_search", disabled=True)
+            st.info(get_text('stt_not_available', lang)) # Use get_text
+
+
+    # 4. Λογική Αναζήτησης (AND Logic)
+    results = []
+    # Use the value from the text input (which might have been updated by mic recorder)
+    search_query_final = st.session_state.library_search_input_text.strip().lower()
+
+    if search_query_final and not search_query_final.startswith("voice input received for"): # Ignore placeholder text
+        search_terms = search_query_final.split()
+        for item in library_data:
+            # Δημιουργία ενός "Searchable String" από όλα τα πεδία
+            full_text = (
+                f"{item.get('brand', '')} "
+                f"{item.get('model', '')} "
+                f"{item.get('meta_type', '')} "
+                f"{item.get('name', '')} " # Full path name
+                f"{item.get('original_name', '')} " # Original filename
+                f"{item.get('error_codes', '')}" # If error codes are added to metadata
+            ).lower()
+            
+            # Έλεγχος: Όλοι οι όροι πρέπει να υπάρχουν
+            if all(term in full_text for term in search_terms):
+                results.append(item)
+        logger.info(f"User searched for '{search_query_final}' - Found {len(results)} matches.") # Rule 4: Logging
+    else:
+        # Αν δεν γράψει τίποτα, δείχνουμε τα πρόσφατα
+        # Sort by file_id (which might imply creation order, or at least consistent order)
+        results = sorted(library_data, key=lambda x: x.get('file_id', ''))[:10] 
+        st.caption(get_text('lib_recent_files', lang)) # Use get_text
+
+    # 5. Εμφάνιση Αποτελεσμάτων
+    if not results and search_query_final and not search_query_final.startswith("voice input received for"):
+        st.error(get_text('lib_no_results', lang)) # Use get_text
+    else:
+        for res in results:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([1, 3, 1])
+                
+                # Στήλη 1: Brand & Badge
+                with c1:
+                    st.markdown(f"**{res.get('brand', get_text('lib_unknown', lang))}**") # Use get_text
+                    color = _get_badge_color(res.get('meta_type', 'DOC'))
+                    st.markdown(f":{color}[{res.get('meta_type', 'DOC').replace('_', ' ')}]") # Replace underscore for better display
+
+                # Στήλη 2: Λεπτομέρειες
+                with c2:
+                    st.markdown(f"📄 **{res.get('model', get_text('lib_general_model', lang))}**") # Use get_text
+                    st.caption(f"{get_text('lib_filename', lang)}: {res.get('original_name', res.get('name'))}") # Use get_text
+                    if res.get('error_codes'):
+                        st.markdown(f"**{get_text('lib_error_codes', lang)}:** {res['error_codes']}") # Use get_text
+                
+                # Στήλη 3: Κουμπί Άνοιγμα
+                with c3:
+                    st.download_button(
+                        label="⬇️ Download",
+                        data=b"Simulated download data", # In a real app, this would fetch data
+                        file_name=res.get('original_name', 'download.pdf'),
+                        mime=res.get('mime', 'application/octet-stream'),
+                        key=f"download_{res.get('file_id')}",
+                        use_container_width=True,
+                        disabled=True # Disable for now, as actual download not implemented in this snippet
+                    )
+                    st.link_button(
+                        label="👁️ View",
+                        url=res.get('link', '#'),
+                        key=f"view_{res.get('file_id')}",
+                        use_container_width=True
+                    )

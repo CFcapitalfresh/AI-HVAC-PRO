@@ -2,9 +2,6 @@
 MODULE: Chat Interface System
 VERSION: 2.0.0 (TITANIUM)
 DESCRIPTION: Διαχειρίζεται το UI της συνομιλίας, τα Uploads και την αλληλεπίδραση με το AI.
-             **Αυτό το module φαίνεται να είναι πλέον ΑΝΕΝΕΡΓΟ/REDUNDANT, καθώς το `main.py`
-             χρησιμοποιεί `modules/ui_chat.py` για την κύρια λειτουργία συνομιλίας.**
-             Εάν υπάρχουν μοναδικές λειτουργίες εδώ, θα πρέπει να μεταφερθούν στο `modules/ui_chat.py`.
 """
 
 import streamlit as st

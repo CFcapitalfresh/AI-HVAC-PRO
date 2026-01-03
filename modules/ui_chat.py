@@ -17,25 +17,27 @@ import logging
 from typing import List, Dict, Any, Optional
 
 from core.language_pack import get_text
-from core.ai_engine import AIEngine # Used here for type hint/info only
-from services.chat_session import ChatSessionService
-from core.drive_manager import DriveManager # For potential file operations if needed
+from services.chat_session import ChatSessionService # Rule 3: Use service layer for business logic.
 
 # Import Speech-to-Text library with graceful error handling (Rule 1)
 try:
     from streamlit_mic_recorder import mic_recorder
+    # Placeholder for actual STT service integration
+    # from some_stt_service import SpeechToTextService 
+    # stt_service = SpeechToTextService()
 except ImportError:
     mic_recorder = None
+    # stt_service = None
 
 # Ρύθμιση Logger για το Module (Rule 4)
 logger = logging.getLogger("Module_Chat_UI")
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
-    # Use existing instance if available, otherwise create a new one.
-    # Rule 3: Modularity - Use service layer for business logic.
-    session_srv = ChatSessionService()
-    drive_manager = DriveManager() # Instantiate DriveManager for file uploads.
+    # Use existing instance if available, otherwise create a new one. (Rule 6)
+    if 'chat_session_service' not in st.session_state:
+        st.session_state.chat_session_service = ChatSessionService()
+    session_srv = st.session_state.chat_session_service
 
     st.header(get_text('menu_chat', lang))
 
@@ -46,8 +48,7 @@ def render(user):
         col1, col2, col3 = st.columns([2, 2, 3])
         
         # Get brands from the service layer, which uses the library cache
-        # If library_cache not loaded, this will return empty list.
-        brands = ["-"] + session_srv.get_brands()
+        brands = ["-"] + session_srv.get_brands() # Ensures initial list even if empty
 
         # Labels από το Language Pack
         lbl_brand = get_text('brand_label', lang)
@@ -58,17 +59,13 @@ def render(user):
         selected_model = col2.text_input(lbl_model, key="ctx_model")
 
         # 1. Βρες τα manuals για την τρέχουσα επιλογή
-        # The result from get_prioritized_manuals is used in the processing logic below,
-        # but here we display a summary in the UI based on the selection.
         initial_manuals = []
         if selected_brand != "-":
             try:
                 # The service layer prioritizes manuals based on current selection.
-                # Do not pass a user query yet, just fetch based on brand/model.
                 initial_manuals = session_srv.get_prioritized_manuals(selected_brand, selected_model, user_query="")
                 if initial_manuals:
                     msg = get_text('manuals_found', lang)
-                    # Rule 5: Correct use of format for translations with placeholders
                     col3.success(f"✅ {msg.format(count=len(initial_manuals))}")
                 else:
                     msg = get_text('no_manuals', lang)
@@ -97,7 +94,7 @@ def render(user):
     tab_txt, tab_mic, tab_up = st.tabs([t_text, t_voice, t_upload])
     
     user_prompt = None
-    uploaded_files_context = [] # List to hold file-like objects for AI
+    uploaded_files_for_ai = [] # List to hold file-like objects for AI processing
 
     # 1. Text Input
     with tab_txt:
@@ -111,96 +108,78 @@ def render(user):
             st.write(get_text('voice_input_help', lang))
             audio_bytes = mic_recorder(start_prompt="🔴 REC", stop_prompt="⏹️ STOP", key='chat_mic_btn')
             if audio_bytes:
-                st.info(get_text('voice_input_activated', lang))
-                # Here, integrate Speech-to-Text service. For now, it's a placeholder.
-                # Example: recognized_text = speech_to_text_service.convert(audio_bytes)
-                # For demo, just use a placeholder text
-                user_prompt = f"Από φωνητική εντολή: Το πρόβλημα είναι..." # Placeholder
-                st.session_state.messages.append({"role": "user", "content": f"🎤 {user_prompt}"})
-                st.rerun() # Trigger a rerun to process the prompt immediately
+                st.info(get_text('voice_stt_processing', lang))
+                try:
+                    # Placeholder for actual Speech-to-Text integration
+                    # For demonstration, we simulate an STT response.
+                    simulated_stt_text = "Δεν ψύχει το κλιματιστικό Daikin" # Replace with actual STT output
+                    # if stt_service:
+                    #    user_prompt = stt_service.convert(audio_bytes)
+                    # else:
+                    #    user_prompt = simulated_stt_text
+                    user_prompt = simulated_stt_text # Assign the recognized text to user_prompt
+                    logger.info(f"STT recognized: '{user_prompt}'")
+                    # No rerun needed here, the prompt will be processed in the main if user_prompt block
+                except Exception as e:
+                    st.error(get_text('voice_stt_error', lang).format(error=str(e)))
+                    logger.error(f"Error during STT processing in chat: {e}", exc_info=True)
         else:
-            st.warning("🎧 Η βιβλιοθήκη 'streamlit_mic_recorder' δεν βρέθηκε. Εγκαταστήστε την: `pip install streamlit-mic-recorder`.")
+            st.button("🎤 (STT Unavailable)", key="mic_unavailable_chat")
+            st.warning("Speech-to-Text library not installed. Run `pip install streamlit-mic-recorder`.")
 
     # 3. File Upload (Rule 2)
     with tab_up:
-        lbl_up = get_text('upload_files_label', lang)
-        help_up = get_text('upload_manual_help', lang)
-        uploaded_pdfs = st.file_uploader(lbl_up + " (PDF)", type=["pdf"], accept_multiple_files=True, key="chat_pdf_uploader_tab", help=help_up)
-        uploaded_imgs = st.file_uploader(lbl_up + " (Εικόνες)", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="chat_img_uploader_tab", help=help_up)
-
-        if uploaded_pdfs or uploaded_imgs:
-            st.success(f"Έτοιμα για αποστολή: {len(uploaded_pdfs or []) + len(uploaded_imgs or [])} αρχεία")
-            # If a prompt is also entered, these files will be processed with it.
-            # If only files are uploaded, a default prompt might be needed, or we wait for user to type.
-            # For now, we assume user will also type a prompt to go with files or re-rerun.
-            
-            # Convert uploaded files to file-like objects for AI processing
-            for file in (uploaded_pdfs or []):
-                uploaded_files_context.append(file)
-            for file in (uploaded_imgs or []):
-                uploaded_files_context.append(file)
-
-    # --- PROCESS USER INPUT & AI RESPONSE ---
-    if user_prompt or uploaded_files_context:
-        # Display user message
-        st.session_state.messages.append({"role": "user", "content": user_prompt or "Επισύναψη αρχείων."})
-        with st.chat_message("user"):
-            st.markdown(user_prompt or "Επισύναψη αρχείων.")
-            if uploaded_files_context:
-                st.markdown(f"*📎 Επισυνάφθηκαν {len(uploaded_files_context)} αρχεία για ανάλυση.*")
-
-        # Prepare context manuals (if brand/model selected)
-        context_manuals_text: List[str] = []
-        if selected_brand != "-" and (user_prompt or uploaded_files_context): # Only fetch if there's a prompt
-            try:
-                # Fetch top N manuals based on current context and user query
-                prioritized_manual_items = session_srv.get_prioritized_manuals(selected_brand, selected_model, user_prompt or "")
-                
-                # Limit to top N manuals to avoid exceeding token limits
-                MAX_MANUALS_FOR_CONTEXT = 3 
-                for i, manual_item in enumerate(prioritized_manual_items[:MAX_MANUALS_FOR_CONTEXT]):
-                    manual_file_content = session_srv.get_manual_text_content(manual_item['file_id'])
-                    if manual_file_content:
-                        context_manuals_text.append(manual_file_content)
-                        logger.info(f"Adding manual '{manual_item['original_name']}' to AI context.")
-                    else:
-                        logger.warning(f"Could not retrieve content for manual: {manual_item['original_name']}")
-                if context_manuals_text:
-                    st.session_state.messages.append({"role": "assistant", "content": get_text('studying_sources', lang).format(count=len(context_manuals_text))})
-                    with st.chat_message("assistant"):
-                        st.markdown(get_text('studying_sources', lang).format(count=len(context_manuals_text)))
-            except Exception as e:
-                logger.error(f"Error preparing manual context: {e}", exc_info=True)
-                st.error(get_text('manual_retrieval_error', lang).format(error=str(e)))
+        uploaded_pdfs = st.file_uploader(get_text('upload_manual_label', lang) + " (PDFs)", type=["pdf"], accept_multiple_files=True, key="chat_pdf_uploader")
+        uploaded_imgs = st.file_uploader(get_text('upload_manual_label', lang) + " (Images)", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="chat_img_uploader")
         
-        # Get AI response
+        if uploaded_pdfs:
+            for uploaded_file in uploaded_pdfs:
+                uploaded_files_for_ai.append(uploaded_file)
+            st.success(f"📎 Έτοιμα για αποστολή: {len(uploaded_pdfs)} PDF αρχεία")
+        if uploaded_imgs:
+            for uploaded_file in uploaded_imgs:
+                uploaded_files_for_ai.append(uploaded_file)
+            st.success(f"📸 Έτοιμα για αποστολή: {len(uploaded_imgs)} Εικόνες")
+
+    # 4. Λογική Επεξεργασίας Μηνύματος (Triggered by any user input)
+    if user_prompt or uploaded_files_for_ai:
+        display_msg = user_prompt if user_prompt else ""
+        if uploaded_files_for_ai:
+            file_names = ", ".join([f.name for f in uploaded_files_for_ai])
+            display_msg += f"\n\n📎 *{get_text('processing_uploaded_file', lang).format(name=file_names)}*"
+        
+        st.session_state.messages.append({"role": "user", "content": display_msg})
+        with st.chat_message("user"):
+            st.markdown(display_msg)
+            # You might want to display thumbnails of uploaded files here as well
+
         with st.chat_message("assistant"):
             response_placeholder = st.empty()
             full_response = ""
+            
             try:
                 with st.spinner(get_text('analyzing', lang)):
-                    # Delegate AI call to ChatSessionService (Rule 3)
-                    full_response = session_srv.get_ai_response(
-                        user_prompt=user_prompt,
-                        uploaded_files=uploaded_files_context,
-                        manual_contexts=context_manuals_text,
-                        chat_history=st.session_state.messages[:-1], # Exclude current user prompt
-                        lang=lang
+                    # Rule 3: Delegate processing to the ChatSessionService
+                    full_response = session_srv.smart_solve(
+                        user_query=user_prompt if user_prompt else "", # Pass empty string if no text prompt
+                        selected_brand=selected_brand,
+                        selected_model=selected_model,
+                        uploaded_files=uploaded_files_for_ai, # Pass the list of uploaded files
+                        history=st.session_state.messages[:-1], # Pass history without the latest user message
+                        lang=lang,
+                        user_email=user['email']
                     )
-                
+
                 response_placeholder.markdown(full_response)
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
-                logger.info(f"AI responded to '{user['email']}' with: {full_response[:50]}...")
 
             except Exception as e:
-                error_msg = f"⚠️ {get_text('ai_engine_error', lang)} {e}"
+                error_msg = f"⚠️ {get_text('ai_engine_error', lang)} {str(e)}"
                 response_placeholder.error(error_msg)
+                logger.error(f"Chat AI response generation error: {e}", exc_info=True)
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
-                logger.error(f"AI response generation failed for user {user['email']}: {e}", exc_info=True)
-                
-        # Clear uploaded files from session state after processing
-        if 'chat_pdf_uploader_tab' in st.session_state:
-            del st.session_state['chat_pdf_uploader_tab']
-        if 'chat_img_uploader_tab' in st.session_state:
-            del st.session_state['chat_img_uploader_tab']
-        st.rerun() # Rerun to clear input fields and uploaded file widgets
+        
+        # Clear uploaded files after processing to prevent re-upload on rerun
+        # This is handled by Streamlit itself for `st.file_uploader` by clearing it on re-run
+        # but the prompt might still be active. Re-run to ensure clean state.
+        st.rerun()

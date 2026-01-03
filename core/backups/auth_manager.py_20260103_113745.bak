@@ -69,10 +69,9 @@ class AuthManager:
                         logger.info(f"User '{email}' logged in successfully from {source_db}.")
                         return user_data.to_dict(), "OK"
                     else:
-                        logger.warning(f"Login failed for '{email}': Account pending approval.")
                         return None, "Account Pending Approval"
                 else:
-                    logger.warning(f"Login failed for '{email}'. Wrong password (legacy check).")
+                    logger.warning(f"Failed login attempt for '{email}'. Wrong password (legacy check).")
                     return None, "Wrong password"
             
             # Περίπτωση Β: Νέος ασφαλής κωδικός (Hash - Bcrypt)
@@ -81,7 +80,6 @@ class AuthManager:
                     logger.info(f"User '{email}' logged in successfully from {source_db}.")
                     return user_data.to_dict(), "OK"
                 else:
-                    logger.warning(f"Login failed for '{email}': Account pending approval.")
                     return None, "Account Pending Approval"
             else:
                 logger.warning(f"Failed login attempt for '{email}'. Wrong password (bcrypt check).")
@@ -102,78 +100,80 @@ class AuthManager:
         if password: password = password.strip()
 
         if not email or not password:
-            logger.warning("Attempted registration with missing email or password.")
+            st.error("Email και Κωδικός απαιτούνται.")
             return False
 
         # 2. ΕΛΕΓΧΟΣ ΑΝ ΥΠΑΡΧΕΙ ΗΔΗ ΣΕ GSheets
-        try:
-            users_gsheets = DatabaseConnector.fetch_data("Users")
-            if not users_gsheets.empty and email in users_gsheets['email'].values:
-                logger.warning(f"Registration attempt for existing email: {email}")
-                st.warning("Το email υπάρχει ήδη. Παρακαλώ συνδεθείτε ή χρησιμοποιήστε διαφορετικό email.")
-                return False 
-        except Exception as e:
-            logger.error(f"Error checking existing users in GSheets during registration: {e}", exc_info=True)
-            st.error("Σφάλμα κατά τον έλεγχο χρηστών. Παρακαλώ δοκιμάστε ξανά αργότερα.")
-            return False
-            
+        users_gsheets = DatabaseConnector.fetch_data("Users")
+        if not users_gsheets.empty and email in users_gsheets['email'].values:
+            st.warning("Το email υπάρχει ήδη. Παρακαλώ συνδεθείτε ή χρησιμοποιήστε διαφορετικό email.")
+            return False 
+        
         # 3. ΚΡΥΠΤΟΓΡΑΦΗΣΗ (HASHING)
-        try:
-            hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Error hashing password for {email}: {e}", exc_info=True)
-            st.error("Σφάλμα κρυπτογράφησης κωδικού. Παρακαλώ δοκιμάστε ξανά.")
-            return False
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         
         # 4. ΔΗΜΙΟΥΡΓΙΑ ΕΓΓΡΑΦΗΣ
-        new_user_data = [
-            str(datetime.now()), 
-            email,
-            name,
-            hashed,
-            "pending" # Role (Μπαίνει ως 'pending' και θέλει έγκριση από Admin)
-        ]
+        new_user_data = {
+            "created_at": str(datetime.now()), 
+            "email": email,
+            "name": name,
+            "password_hash": hashed,
+            "role": "pending" 
+        }
         
-        # 5. ΑΠΟΘΗΚΕΥΣΗ ΣΕ GSheets
-        try:
-            success_gsheets = DatabaseConnector.append_data("Users", new_user_data)
-            if not success_gsheets:
-                logger.error(f"Failed to append new user {email} to Google Sheets.")
-                return False
-        except Exception as e:
-            logger.error(f"Error appending new user {email} to Google Sheets: {e}", exc_info=True)
+        # 5. ΑΠΟΘΗΚΕΥΣΗ ΣΕ GSheets (primary source for admin approval)
+        gsheets_success = DatabaseConnector.append_data("Users", list(new_user_data.values()), use_local_db=False)
+        if not gsheets_success:
+            logger.error(f"Failed to register user '{email}' in Google Sheets.")
+            st.error("Αποτυχία εγγραφής χρήστη στα Google Sheets.")
             return False
 
-        # 6. ΑΠΟΘΗΚΕΥΣΗ ΣΕ ΤΟΠΙΚΗ ΒΑΣΗ (για συνέπεια)
-        try:
-            success_sqlite = DatabaseConnector.append_data("Users", new_user_data, use_local_db=True)
-            if not success_sqlite:
-                logger.warning(f"Failed to append new user {email} to local SQLite DB.")
-                # Non-critical failure, GSheets is primary
-        except Exception as e:
-            logger.error(f"Error appending new user {email} to local SQLite DB: {e}", exc_info=True)
-            # Non-critical failure
+        # 6. ΑΠΟΘΗΚΕΥΣΗ ΣΕ SQLite (για τοπική χρήση / μελλοντικές native apps)
+        # Εδώ, το SQLite μπορεί να μην έχει όλες τις στήλες. Πρέπει να είμαστε σίγουροι ότι υπάρχουν.
+        # Θα ανακτήσουμε τα ονόματα στηλών από την SQLite για να αποφύγουμε σφάλματα.
+        local_users_df = DatabaseConnector.fetch_data("Users", use_local_db=True)
+        if not local_users_df.empty: # Αν υπάρχει ήδη πίνακας Users
+            sqlite_columns = local_users_df.columns.tolist()
+            # Δημιουργία λίστας δεδομένων με τη σωστή σειρά για την SQLite
+            sqlite_row_data = [new_user_data.get(col) for col in sqlite_columns]
+            sqlite_success = DatabaseConnector.append_data("Users", sqlite_row_data, use_local_db=True)
+            if not sqlite_success:
+                logger.warning(f"Failed to register user '{email}' in local SQLite DB.")
+        else:
+            logger.warning("SQLite Users table not yet initialized or empty. Skipping local registration for now.")
 
-        logger.info(f"User '{email}' registered successfully as pending.")
+        logger.info(f"User '{email}' registered successfully.")
         return True
 
     @staticmethod
     def log_interaction(user_email: str, action: str, description: str):
         """
-        Καταγράφει μια αλληλεπίδραση χρήστη στο φύλλο "Logs".
+        Καταγράφει μια αλληλεπίδραση χρήστη στο φύλλο "Logs" (και τοπικά).
         """
         try:
-            log_entry_values = [
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                user_email,
-                action,
-                description
-            ]
-            # Προσθήκη σε Google Sheets (Cloud)
-            DatabaseConnector.append_data("Logs", log_entry_values, use_local_db=False)
-            # Προσθήκη σε SQLite (Local)
-            DatabaseConnector.append_data("Logs", log_entry_values, use_local_db=True)
-            logger.debug(f"Logged interaction: {action} by {user_email}")
+            log_entry = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "user_email": user_email,
+                "action": action,
+                "description": description
+            }
+            # Αποθήκευση σε GSheets
+            gsheets_success = DatabaseConnector.append_data("Logs", list(log_entry.values()), use_local_db=False)
+            if not gsheets_success:
+                logger.warning(f"Failed to log interaction for '{user_email}' in Google Sheets.")
+
+            # Αποθήκευση σε SQLite
+            # Πρέπει να είμαστε σίγουροι ότι ο πίνακας Logs στην SQLite έχει τις ίδιες στήλες
+            local_logs_df = DatabaseConnector.fetch_data("Logs", use_local_db=True)
+            if not local_logs_df.empty:
+                sqlite_columns = local_logs_df.columns.tolist()
+                sqlite_row_data = [log_entry.get(col) for col in sqlite_columns]
+                sqlite_success = DatabaseConnector.append_data("Logs", sqlite_row_data, use_local_db=True)
+                if not sqlite_success:
+                    logger.warning(f"Failed to log interaction for '{user_email}' in local SQLite DB.")
+            else:
+                logger.warning("SQLite Logs table not yet initialized or empty. Skipping local log for now.")
+
         except Exception as e:
-            logger.error(f"Error logging interaction for {user_email}: {e}", exc_info=True)
-            # st.error(f"Error logging interaction: {e}") # Avoid showing this to users unless critical
+            logger.error(f"Error logging interaction for '{user_email}': {e}", exc_info=True)
+            # st.error(f"Error logging interaction: {e}") # Δεν θέλουμε να εμφανίζεται στον χρήστη

@@ -19,22 +19,19 @@ def render(user):
         st.write(get_text('dash_chat_desc', lang))
         # Χρησιμοποιούμε κενό κουμπί που απλά ενημερώνει (για UX)
         if st.button(get_text('dash_btn_chat', lang), use_container_width=True):
-             st.session_state.page = "AI Chat" # Navigate directly
-             st.rerun()
+             st.info("Select 'AI Chat' from the left menu.")
 
     with col2:
         st.warning(f"📚 **{get_text('dash_lib_card', lang)}**")
         st.write(get_text('dash_lib_desc', lang))
         if st.button(get_text('dash_btn_lib', lang), use_container_width=True):
-             st.session_state.page = "Manuals Library" # Navigate directly
-             st.rerun()
+             st.info("Select 'Manuals Library' from the left menu.")
 
     with col3:
         st.success(f"🧮 **{get_text('dash_tool_card', lang)}**")
         st.write(get_text('dash_tool_desc', lang))
         if st.button(get_text('dash_btn_tool', lang), use_container_width=True):
-             st.session_state.page = "Tools" # Navigate directly
-             st.rerun()
+             st.info("Select 'Tools' from the left menu.")
 
     st.divider()
     st.caption(get_text('dash_status', lang))

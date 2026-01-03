@@ -13,16 +13,16 @@ def render(user):
     with tab1:
         c1, c2 = st.columns(2)
         with c1:
-            area = st.number_input(get_text('tool_area', lang), min_value=5, value=25, key="btu_area")
-            height = st.number_input(get_text('tool_height', lang), min_value=2.0, value=2.8, step=0.1, key="btu_height")
+            area = st.number_input(get_text('tool_area', lang), min_value=5, value=25)
+            height = st.number_input(get_text('tool_height', lang), min_value=2.0, value=2.8, step=0.1)
         
         with c2:
             # Δημιουργούμε λίστες επιλογών που αντιστοιχούν στις μεταφράσεις
             ins_opts = [get_text('ins_good', lang), get_text('ins_avg', lang), get_text('ins_bad', lang)]
             sun_opts = [get_text('sun_low', lang), get_text('sun_med', lang), get_text('sun_high', lang)]
             
-            insulation = st.selectbox(get_text('tool_insulation', lang), ins_opts, key="btu_insulation")
-            sun = st.selectbox(get_text('tool_sun', lang), sun_opts, key="btu_sun")
+            insulation = st.selectbox(get_text('tool_insulation', lang), ins_opts)
+            sun = st.selectbox(get_text('tool_sun', lang), sun_opts)
             
         # Logic (Βασίζεται στο index για να δουλεύει ανεξαρτήτως γλώσσας)
         # Index 0: Good/Low, 1: Avg/Med, 2: Bad/High
@@ -49,17 +49,15 @@ def render(user):
 
     # --- CONVERTER ---
     with tab2:
-        st.subheader(get_text('tool_conv_tab', lang)) # Rule 5
-        val = st.number_input(get_text('converter_value', lang), value=1.0, key="conv_value") # Rule 5
-        c_type = st.radio(get_text('converter_type', lang), [get_text('converter_bar_psi', lang), get_text('converter_c_f', lang), get_text('converter_kw_btu', lang)], key="conv_type") # Rule 5
-        st.write(f"{get_text('converter_result', lang)}") # Rule 5
-        if c_type == get_text('converter_bar_psi', lang): st.write(f"➡️ **{round(val * 14.5038, 2)} PSI**")
-        elif c_type == get_text('converter_c_f', lang): st.write(f"➡️ **{round((val * 9/5) + 32, 1)} °F**")
-        elif c_type == get_text('converter_kw_btu', lang): st.write(f"➡️ **{int(val * 3412)} BTU/h**")
+        val = st.number_input("Value", value=1.0)
+        c_type = st.radio("Type", ["Bar -> PSI", "C -> F", "kW -> BTU"])
+        if c_type == "Bar -> PSI": st.write(f"➡️ **{round(val * 14.5038, 2)} PSI**")
+        elif c_type == "C -> F": st.write(f"➡️ **{round((val * 9/5) + 32, 1)} °F**")
+        elif c_type == "kW -> BTU": st.write(f"➡️ **{int(val * 3412)} BTU/h**")
 
     # --- PIPING ---
     with tab3:
-        st.subheader(get_text('piping_guide_title', lang)) # Rule 5
+        st.subheader("R32/R410a Guide")
         data = {
             "BTU": ["9.000", "12.000", "18.000", "24.000"],
             get_text('pipe_liquid', lang): ["1/4''", "1/4''", "1/4''", "3/8''"],

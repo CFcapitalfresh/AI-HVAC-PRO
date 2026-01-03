@@ -28,10 +28,9 @@ class StreamlitSpyHandler(logging.Handler):
             elif record.levelno == logging.INFO and ("Success" in msg or "✅" in msg): icon = "✅"
             elif record.levelno == logging.ERROR: icon = "❌"
             elif record.levelno == logging.CRITICAL: icon = "🔥"
-            elif "Vision" in msg or "Gemini" in record.name: icon = "👁️" # More specific for AI
-            elif "Drive" in msg or "Drive" in record.name: icon = "📂" # More specific for Drive
+            elif "Vision" in msg: icon = "👁️"
+            elif "Drive" in msg: icon = "📂"
             elif "Spy" in record.name: icon = "🕵️" # Για τα δικά του logs του Spy
-            elif "DEBUG" in record.levelname: icon = "🐛" # Debug icon
             
             entry = f"`{timestamp}` {icon} **{record.name}:** {msg}"
             
@@ -44,6 +43,9 @@ class StreamlitSpyHandler(logging.Handler):
             if len(st.session_state.spy_logs) > 100:
                 st.session_state.spy_logs.pop()
             
+            # REMOVED: Αποθήκευση στην τοπική βάση SQLite
+            # DatabaseConnector.insert_spy_log(log_entry_db)
+
         except Exception:
             self.handleError(record)
 
@@ -55,6 +57,7 @@ def setup_spy():
         root_logger.setLevel(logging.INFO)
         
         # Καθαρισμός παλιών handlers για να μην έχουμε διπλά μηνύματα
+        # ΔΙΟΡΘΩΣΗ: Αφαιρούμε μόνο τα instances του StreamlitSpyHandler
         root_logger.handlers = [h for h in root_logger.handlers if not isinstance(h, StreamlitSpyHandler)]
         
         # Προσθήκη του δικού μας Handler

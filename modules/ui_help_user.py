@@ -2,27 +2,22 @@ import streamlit as st
 from core.language_pack import get_text
 
 def render(user):
-    st.header(get_text('help_title', st.session_state.lang))
+    lang = st.session_state.get('lang', 'gr') # Rule 6
+    st.header(get_text('help_title', lang))
     
-    st.info("ℹ️ Οδηγός Χρήσης Mastro Nek AI")
+    st.info(get_text('help_info_card', lang)) # Rule 5
     
-    with st.expander("💬 Πώς χρησιμοποιώ το Chat;"):
-        st.write("""
-        1. Πήγαινε στο μενού 'Chat'.
-        2. Γράψε την ερώτησή σου στο κάτω μέρος.
-        3. Μπορείς να ανεβάσεις φωτογραφίες ή PDF από το συνδετήρα.
-        """)
+    with st.expander(get_text('help_chat_expander', lang)): # Rule 5
+        st.write(get_text('help_chat_1', lang)) # Rule 5
+        st.write(get_text('help_chat_2', lang)) # Rule 5
+        st.write(get_text('help_chat_3', lang)) # Rule 5
         
-    with st.expander("🔎 Πώς βρίσκω Manuals;"):
-        st.write("""
-        1. Πήγαινε στη 'Βιβλιοθήκη'.
-        2. Γράψε το μοντέλο ή τη μάρκα.
-        3. Πάτα το Link για να ανοίξει το PDF.
-        """)
+    with st.expander(get_text('help_search_expander', lang)): # Rule 5
+        st.write(get_text('help_search_1', lang)) # Rule 5
+        st.write(get_text('help_search_2', lang)) # Rule 5
+        st.write(get_text('help_search_3', lang)) # Rule 5
         
-    with st.expander("🧠 Πώς λειτουργεί ο Organizer (Admin);"):
-        st.write("""
-        1. Πήγαινε στο 'AI Organizer'.
-        2. Πάτα 'Έναρξη'.
-        3. Το σύστημα θα διαβάσει τα ατακτοποίητα PDF και θα τα βάλει σε φακέλους αυτόματα.
-        """)
+    with st.expander(get_text('help_organizer_expander', lang)): # Rule 5
+        st.write(get_text('help_organizer_1', lang)) # Rule 5
+        st.write(get_text('help_organizer_2', lang)) # Rule 5
+        st.write(get_text('help_organizer_3', lang)) # Rule 5
