@@ -1,0 +1,20 @@
+### FILE: core/language_pack.py
+
+LANGUAGE_PACK = {
+    # ... (existing entries) ...
+    # --- UI Chat (New/Modified Keys) ---
+    "chat_context_title": {"gr": "Επιλέξτε Συσκευή Context", "en": "Select Context Device"}, # NEW KEY
+    "brand_label": {"gr": "Μάρκα", "en": "Brand"}, # NEW KEY (standardized)
+    "model_label": {"gr": "Μοντέλο", "en": "Model"}, # NEW KEY (standardized)
+    "manuals_found": {"gr": "Βρέθηκαν σχετικά manuals.", "en": "Found related manuals."}, # NEW KEY
+    "no_manuals": {"gr": "Δεν βρέθηκαν σχετικά manuals.", "en": "No manuals found."}, # NEW KEY
+    "select_brand_for_search": {"gr": "Επιλέξτε μάρκα για αναζήτηση.", "en": "Select a brand for search."}, # NEW KEY
+    "chat_tab_text": {"gr": "Κείμενο", "en": "Text"}, # EXISTING KEY (from previous context, ensure presence)
+    "chat_tab_upload": {"gr": "Ανέβασμα Manual", "en": "Manual Upload"}, # EXISTING KEY (from previous context, ensure presence)
+    "upload_files_label": {"gr": "Ανέβασμα PDF/Εικόνας", "en": "Upload PDF/Image"}, # NEW KEY
+    "chat_upload_instructions": {"gr": "Ανεβάστε ένα PDF ή μια εικόνα για να το στείλετε στο AI.", "en": "Upload a PDF or image to send its content to the AI."}, # EXISTING KEY (from previous context, ensure presence)
+    "chat_input_placeholder": {"gr": "Περιγράψτε το πρόβλημα ή τον κωδικό βλάβης...", "en": "Describe the issue or error code..."}, # EXISTING KEY (from previous context, ensure presence)
+    "ai_engine_error": {"gr": "Σφάλμα AI:", "en": "AI Error:"}, # NEW KEY
+    "analyzing": {"gr": "Ανάλυση...", "en": "Analyzing..."}, # NEW KEY (for spinner message)
+    # ... (other keys) ...
+}
