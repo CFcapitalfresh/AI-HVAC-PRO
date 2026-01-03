@@ -9,33 +9,31 @@ import re
 try:
     import google.generativeai as genai
     from streamlit_mic_recorder import mic_recorder
-except ImportError as e:
-    st.error("🛑 ΛΕΙΠΟΥΝ ΒΙΒΛΙΟΘΗΚΕΣ!")
-    st.info("Τρέξε στο τερματικό: pip install google-generativeai streamlit-mic-recorder")
+except ImportError:
+    st.error("Missing libraries. Run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-# --- 2. ΡΥΘΜΙΣΕΙΣ ---
-st.set_page_config(page_title="Architect AI", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Architect AI v10", page_icon="🏗️", layout="wide")
 
+# --- 2. ΡΥΘΜΙΣΕΙΣ (Protected Rules) ---
 PROTECTED_FEATURES = [
     "1. MICROPHONE/AUDIO: Πάντα κουμπί για φωνητική εντολή στο UI.",
     "2. PDF UPLOAD: Πάντα υποστήριξη PDF/Images.",
     "3. MODULARITY: Χρήση imports (core/modules), όχι μονολιθικός κώδικας.",
-    "4. ERROR HANDLING: Πάντα try/except blocks.",
-    "5. LANGUAGE: Υποστήριξη GR/EN.",
+    "4. ERROR HANDLING: Πάντα try/except blocks και logging.",
+    "5. LANGUAGE: Υποστήριξη GR/EN (get_text).",
     "6. STREAMLIT STATE: Έλεγχος initialization keys.",
     "7. DRIVE MANAGER: Προσοχή στο core/drive_manager.py."
 ]
 
-# --- 3. PROJECT SCANNING ---
+# --- 3. HELPER FUNCTIONS ---
 def get_project_structure():
-    """Σαρώνει το project αναδρομικά."""
+    """Deep Scan: Βλέπει τα πάντα."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     structure = ""
     file_contents = {}
-    
-    ignore_dirs = {"__pycache__", ".git", ".streamlit", "venv", ".vscode", ".idea", "env", "build", "dist"}
-    ignore_files = {"architect.py", "requirements.txt", "README.md", ".DS_Store", ".gitignore", "LICENSE"}
+    ignore_dirs = {"__pycache__", ".git", ".streamlit", "venv", ".vscode", "env", "build", "dist"}
+    ignore_files = {"architect.py", "requirements.txt", "README.md", ".gitignore", "LICENSE", ".DS_Store"}
     
     for path, subdirs, files in os.walk(root_dir):
         subdirs[:] = [d for d in subdirs if d not in ignore_dirs]
@@ -47,202 +45,189 @@ def get_project_structure():
                 try:
                     with open(full_path, "r", encoding="utf-8") as f:
                         file_contents[rel_path] = f.read()
-                except Exception as e:
-                    print(f"Error reading {rel_path}: {e}")
-                    
+                except: pass
     return structure, file_contents, root_dir
 
 def save_code_to_file(rel_path, new_code):
     try:
         root_dir = os.path.dirname(os.path.abspath(__file__))
-        clean_path = rel_path.replace("/", os.sep).replace("\\", os.sep)
-        full_path = os.path.join(root_dir, clean_path)
+        full_path = os.path.join(root_dir, rel_path.replace("/", os.sep))
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        if os.path.exists(full_path):
-            shutil.copy(full_path, f"{full_path}.bak")
-        with open(full_path, "w", encoding="utf-8") as f:
-            f.write(new_code)
+        if os.path.exists(full_path): shutil.copy(full_path, f"{full_path}.bak")
+        with open(full_path, "w", encoding="utf-8") as f: f.write(new_code)
         return True, f"✅ Saved: {rel_path}"
-    except Exception as e:
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
-# --- 4. GOOGLE MODELS (LIVE FETCH) ---
+# --- 4. SMART MODEL HANDLING (v9 Feature) ---
 @st.cache_data(ttl=600)
 def get_available_models(api_key):
-    """Ρωτάει την Google τι έχει διαθέσιμο."""
     if not api_key: return []
     genai.configure(api_key=api_key)
     try:
         models = list(genai.list_models())
-        names = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
-        # Φιλτράρισμα μόνο για Gemini
-        names = [n for n in names if "gemini" in n.lower()]
-        return sorted(names, reverse=True) # Τα νεότερα πρώτα
-    except:
-        return []
+        names = [m.name for m in models if 'generateContent' in m.supported_generation_methods and "gemini" in m.name.lower()]
+        return sorted(names, reverse=True)
+    except: return []
 
-# --- 5. MAIN APP ---
+def generate_with_retry(model_name, prompt_parts):
+    """v10 Feature: Επιμονή αν η Google ρίξει πόρτα (429)."""
+    model = genai.GenerativeModel(model_name)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return model.generate_content(prompt_parts).text
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(5 * (attempt + 1)) # Backoff
+                continue
+            raise e
+    raise Exception("Google API Overloaded (429). Try again later.")
+
+# --- 5. MAIN LOGIC ---
 def main():
-    st.title("🏗️ The Architect (Control Mode)")
+    st.title("🏗️ The Architect v10 (Ultimate)")
     
     # --- Sidebar ---
     with st.sidebar:
-        # API Key Logic
         api_key = None
         try:
             api_key = st.secrets.get("GEMINI_KEY") or st.secrets.get("general", {}).get("GEMINI_KEY")
         except: pass
-            
+        
         if not api_key:
             api_key = st.text_input("🔑 API Key", type="password")
-            if not api_key: 
-                st.warning("Βάλε κλειδί για να ξεκινήσω.")
-                st.stop()
+            if not api_key: st.stop()
         else:
-            st.success("API Key: OK")
-        
-        # --- MODEL SELECTOR (Η ΛΥΣΗ ΣΟΥ) ---
-        st.divider()
-        st.subheader("🎛️ Επιλογή Μοντέλου")
-        
-        with st.spinner("Ρωτάω την Google..."):
-            available_models = get_available_models(api_key)
-        
-        if available_models:
-            # Προσπαθούμε να βρούμε το 1.5 Flash ως default
-            default_idx = 0
-            for i, m in enumerate(available_models):
-                if "1.5-flash" in m and "001" in m: # Προτίμηση στο stable 001
-                    default_idx = i
-                    break
-                elif "1.5-flash" in m:
-                    default_idx = i
-                    break
+            st.success("API Key Found")
             
-            selected_model = st.selectbox("Διάλεξε Μοντέλο:", available_models, index=default_idx)
-            st.info(f"Ενεργό: **{selected_model}**")
+        # Model Selector (v9)
+        models = get_available_models(api_key)
+        if models:
+            def_ix = 0
+            for i, m in enumerate(models):
+                if "1.5-flash" in m: def_ix = i; break
+            sel_model = st.selectbox("Model:", models, index=def_ix)
         else:
-            st.error("Δεν βρέθηκαν μοντέλα. Ίσως το κλειδί έχει θέμα ή η Google είναι πεσμένη.")
+            st.error("No models found.")
             st.stop()
 
-        st.divider()
-        if st.button("🔄 Reload Files"): st.rerun()
-        if st.button("🗑️ Reset Chat"): 
+        if st.button("🗑️ Reset"): 
             st.session_state.messages = []
-            st.session_state.pending_changes = [] 
-            st.session_state.last_processed_audio = None
+            st.session_state.pending_changes = []
+            st.session_state.last_audio = None
             st.rerun()
 
-    # --- Initialization ---
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": f"Γεια! Είμαι συνδεδεμένος με το **{selected_model}**. Πες μου τι να κάνω."}]
+    # Session
+    if "messages" not in st.session_state: st.session_state.messages = [{"role":"assistant", "content": "Ready."}]
     if "pending_changes" not in st.session_state: st.session_state.pending_changes = []
-    if "last_processed_audio" not in st.session_state: st.session_state.last_processed_audio = None
-    
-    # --- Load Files ---
-    structure, file_contents, root_path = get_project_structure()
-    
-    # --- UI ---
-    c1, c2 = st.columns([1, 2])
-    
-    with c1:
-        st.subheader("🔎 Σάρωση")
-        st.caption(f"Path: `{os.path.basename(root_path)}/`")
-        files = sorted(list(file_contents.keys()))
-        
-        # Smart Select
-        def_idx = 0
-        for i, f in enumerate(files):
-            if "ui_chat.py" in f: def_idx = i; break
-        
-        target_file = st.selectbox("Εστίαση σε:", files, index=def_idx)
-        with st.expander("Προβολή Κώδικα", expanded=True):
-            st.code(file_contents.get(target_file, ""), language="python")
+    if "last_audio" not in st.session_state: st.session_state.last_audio = None
 
-    with c2:
-        st.subheader("💬 Εντολές")
-        chat_container = st.container(height=500)
-        with chat_container:
-            for msg in st.session_state.messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-        
-        # Inputs
-        t_mic, t_txt = st.tabs(["🎙️", "⌨️"])
-        user_in = None
-        is_audio = False
-        
-        with t_mic:
-            ad = mic_recorder(start_prompt="🔴 REC", stop_prompt="⏹️ STOP", key='main_rec')
-            if ad and ad['id'] != st.session_state.last_processed_audio:
-                user_in = ad['bytes']
-                is_audio = True
-                st.session_state.last_processed_audio = ad['id']
-        with t_txt:
-            tx = st.chat_input("Εντολή...")
-            if tx: user_in = tx
+    # Load Files (v8 Deep Scan)
+    structure, file_contents, root = get_project_structure()
+    
+    # --- TABS: Chat vs Auto (v8 Feature is BACK) ---
+    tab_chat, tab_auto = st.tabs(["💬 Chat & Εντολές", "🛡️ Αυτόματος Έλεγχος"])
 
-        # --- PROCESS ---
-        if user_in:
-            if is_audio: st.session_state.messages.append({"role": "user", "content": "🎤 *(Audio)*"})
-            else: st.session_state.messages.append({"role": "user", "content": user_in})
+    # --- TAB 1: Chat ---
+    with tab_chat:
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            st.caption(f"Scanning: `{os.path.basename(root)}/`")
+            all_files = sorted(list(file_contents.keys()))
             
-            with st.spinner(f"Εκτέλεση με {selected_model}..."):
-                try:
-                    # Χρησιμοποιούμε το μοντέλο που ΔΙΑΛΕΞΕ Ο ΧΡΗΣΤΗΣ
-                    model = genai.GenerativeModel(selected_model)
-                    
-                    full_context = "PROJECT:\n"
-                    for f, c in file_contents.items():
-                        full_context += f"\n--- FILE: {f} ---\n{c}\n"
-                    
-                    prompt = f"""
-                    ROLE: Expert Python Dev. LANGUAGE: GREEK.
-                    MODEL: {selected_model}
-                    RULES: {PROTECTED_FEATURES}
-                    CONTEXT: {full_context}
-                    FOCUS FILE: {target_file}
-                    
-                    INSTRUCTION:
-                    1. If AUDIO input: Start response with **🎧 Άκουσα:** "...".
-                    2. Output code blocks with: ### FILE: filename.py
-                    """
-                    
-                    parts = [prompt]
-                    if is_audio: parts.append({"mime_type": "audio/wav", "data": user_in})
-                    else: parts.append(f"USER REQUEST: {user_in}")
+            # Smart Select
+            def_ix = 0
+            for i, f in enumerate(all_files): 
+                if "ui_chat.py" in f: def_ix = i
+            
+            focus_file = st.selectbox("Focus:", all_files, index=def_ix)
+            with st.expander("Code View"):
+                st.code(file_contents.get(focus_file, ""), language="python")
 
-                    resp = model.generate_content(parts).text
-                    st.session_state.messages.append({"role": "assistant", "content": resp})
-                    
-                    # Parse
-                    changes = []
-                    for f, c in re.findall(r"### FILE: (.+?)\n.*?```python(.*?)```", resp, re.DOTALL):
-                        changes.append({"filename": f.strip(), "code": c.strip()})
-                    
-                    if changes: st.session_state.pending_changes = changes
-                    st.rerun()
+        with c2:
+            for m in st.session_state.messages:
+                with st.chat_message(m["role"]): st.markdown(m["content"])
+            
+            # Input
+            t1, t2 = st.tabs(["Mic", "Text"])
+            user_in = None
+            is_audio = False
+            
+            with t1:
+                aud = mic_recorder(start_prompt="🔴", stop_prompt="⏹️", key='mic')
+                if aud and aud['id'] != st.session_state.last_audio:
+                    user_in = aud['bytes']
+                    is_audio = True
+                    st.session_state.last_audio = aud['id']
+            with t2:
+                txt = st.chat_input("Type...")
+                if txt: user_in = txt
+            
+            if user_in:
+                process_request(sel_model, user_in, is_audio, file_contents, structure, focus_file, False)
 
-                except Exception as e:
-                    st.error(f"AI Error ({selected_model}): {e}")
+    # --- TAB 2: Autonomous (v8 Feature) ---
+    with tab_auto:
+        st.info("Ο Αρχιτέκτονας θα σκανάρει όλο το project και θα προτείνει διορθώσεις.")
+        if st.button("🚀 ΕΚΤΕΛΕΣΗ ΑΥΤΟΜΑΤΟΥ ΕΛΕΓΧΟΥ", type="primary"):
+            auto_prompt = "ACT AS AN AUTONOMOUS AUDITOR. Scan all files. Identify the biggest bug or missing feature based on Protected Rules. Write the fix."
+            process_request(sel_model, auto_prompt, False, file_contents, structure, focus_file, True)
 
-    # --- SAVE ---
+    # --- SAVE SECTION (v7.7 Feature) ---
     if st.session_state.pending_changes:
         st.divider()
-        st.success(f"✅ Έτοιμα {len(st.session_state.pending_changes)} αρχεία!")
-        
-        for idx, change in enumerate(st.session_state.pending_changes):
-            with st.expander(f"📄 {change['filename']}", expanded=True):
-                st.code(change['code'], language="python")
-        
-        if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ ΟΛΩΝ", type="primary"):
+        st.success(f"Generated {len(st.session_state.pending_changes)} files.")
+        for ch in st.session_state.pending_changes:
+            with st.expander(f"📄 {ch['file']}"):
+                st.code(ch['code'], language="python")
+
+        if st.button("💾 SAVE ALL", type="primary"):
             for ch in st.session_state.pending_changes:
-                save_code_to_file(ch['filename'], ch['code'])
+                save_code_to_file(ch["file"], ch["code"])
             st.success("Saved!")
             st.session_state.pending_changes = []
             time.sleep(1)
             st.rerun()
 
+def process_request(model_name, user_in, is_audio, files, structure, focus_file, is_auto):
+    if is_audio: st.session_state.messages.append({"role":"user", "content":"🎤 Audio"})
+    elif not is_auto: st.session_state.messages.append({"role":"user", "content":user_in})
+    
+    with st.spinner("Thinking..."):
+        try:
+            full_context = "PROJECT:\n" + "\n".join([f"--- {k} ---\n{v}" for k,v in files.items()])
+            
+            prompt = f"""
+            ROLE: Senior Python Architect. Lang: GREEK.
+            RULES: {PROTECTED_FEATURES}
+            CONTEXT: {full_context}
+            FOCUS: {focus_file}
+            REQUEST: {user_in if not is_audio else "Transcribe and execute."}
+            
+            OUTPUT FORMAT:
+            Explain plan.
+            ### FILE: filename.py
+            ```python
+            code
+            ```
+            """
+            
+            parts = [prompt]
+            if is_audio: parts.append({"mime_type": "audio/wav", "data": user_in})
+            
+            # Use Retry Logic
+            resp = generate_with_retry(model_name, parts)
+            
+            st.session_state.messages.append({"role":"assistant", "content":resp})
+            
+            changes = []
+            for f, c in re.findall(r"### FILE: (.+?)\n.*?```python(.*?)```", resp, re.DOTALL):
+                changes.append({"file": f.strip(), "code": c.strip()})
+            
+            if changes: st.session_state.pending_changes = changes
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error: {e}")
+
 if __name__ == "__main__":
-    try: main()
-    except: st.error(traceback.format_exc())
+    main()
