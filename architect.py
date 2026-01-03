@@ -13,7 +13,7 @@ except ImportError:
     st.error("Missing libraries. Run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v10", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Architect AI v12", page_icon="🏗️", layout="wide")
 
 # --- 2. ΡΥΘΜΙΣΕΙΣ (Protected Rules) ---
 PROTECTED_FEATURES = [
@@ -58,7 +58,7 @@ def save_code_to_file(rel_path, new_code):
         return True, f"✅ Saved: {rel_path}"
     except Exception as e: return False, str(e)
 
-# --- 4. SMART MODEL HANDLING (v9 Feature) ---
+# --- 4. SMART MODEL HANDLING ---
 @st.cache_data(ttl=600)
 def get_available_models(api_key):
     if not api_key: return []
@@ -70,7 +70,7 @@ def get_available_models(api_key):
     except: return []
 
 def generate_with_retry(model_name, prompt_parts):
-    """v10 Feature: Επιμονή αν η Google ρίξει πόρτα (429)."""
+    """Επιμονή αν η Google ρίξει πόρτα (429)."""
     model = genai.GenerativeModel(model_name)
     max_retries = 3
     for attempt in range(max_retries):
@@ -85,7 +85,7 @@ def generate_with_retry(model_name, prompt_parts):
 
 # --- 5. MAIN LOGIC ---
 def main():
-    st.title("🏗️ The Architect v10 (Ultimate)")
+    st.title("🏗️ The Architect v12 (Commercial CEO)")
     
     # --- Sidebar ---
     with st.sidebar:
@@ -100,7 +100,7 @@ def main():
         else:
             st.success("API Key Found")
             
-        # Model Selector (v9)
+        # Model Selector
         models = get_available_models(api_key)
         if models:
             def_ix = 0
@@ -118,31 +118,41 @@ def main():
             st.rerun()
 
     # Session
-    if "messages" not in st.session_state: st.session_state.messages = [{"role":"assistant", "content": "Ready."}]
+    if "messages" not in st.session_state: st.session_state.messages = [{"role":"assistant", "content": "Γεια! Γνωρίζω ότι χτίζουμε ένα Commercial SaaS Product. Ποιο είναι το επόμενο βήμα;"}]
     if "pending_changes" not in st.session_state: st.session_state.pending_changes = []
     if "last_audio" not in st.session_state: st.session_state.last_audio = None
 
-    # Load Files (v8 Deep Scan)
+    # Load Files
     structure, file_contents, root = get_project_structure()
     
-    # --- TABS: Chat vs Auto (v8 Feature is BACK) ---
-    tab_chat, tab_auto = st.tabs(["💬 Chat & Εντολές", "🛡️ Αυτόματος Έλεγχος"])
+    # --- TABS ---
+    tab_chat, tab_auto = st.tabs(["💬 Chat & Development", "🛡️ Market & Code Audit"])
 
     # --- TAB 1: Chat ---
     with tab_chat:
         c1, c2 = st.columns([1, 2])
         with c1:
             st.caption(f"Scanning: `{os.path.basename(root)}/`")
-            all_files = sorted(list(file_contents.keys()))
             
-            # Smart Select
-            def_ix = 0
-            for i, f in enumerate(all_files): 
-                if "ui_chat.py" in f: def_ix = i
+            # SCOPE SELECTOR
+            scope_mode = st.radio("🔭 Εστίαση:", ["📂 Ένα Αρχείο", "🌍 Όλο το Project (Global)"])
             
-            focus_file = st.selectbox("Focus:", all_files, index=def_ix)
-            with st.expander("Code View"):
-                st.code(file_contents.get(focus_file, ""), language="python")
+            focus_context = ""
+            focus_file_name = "GLOBAL_CONTEXT"
+            
+            if scope_mode == "📂 Ένα Αρχείο":
+                all_files = sorted(list(file_contents.keys()))
+                def_ix = 0
+                for i, f in enumerate(all_files): 
+                    if "ui_chat.py" in f: def_ix = i
+                
+                focus_file_name = st.selectbox("Επιλογή Αρχείου:", all_files, index=def_ix)
+                with st.expander("Code View"):
+                    st.code(file_contents.get(focus_file_name, ""), language="python")
+                focus_context = f"CURRENT FILE ({focus_file_name}):\n```python\n{file_contents.get(focus_file_name, '')}\n```"
+            else:
+                st.info("Ο Αρχιτέκτονας βλέπει όλο το project για συνολικές αλλαγές.")
+                focus_context = "GLOBAL PROJECT CONTEXT (All Files Provided in System Prompt)"
 
         with c2:
             for m in st.session_state.messages:
@@ -164,16 +174,40 @@ def main():
                 if txt: user_in = txt
             
             if user_in:
-                process_request(sel_model, user_in, is_audio, file_contents, structure, focus_file, False)
+                process_request(sel_model, user_in, is_audio, file_contents, structure, focus_file_name, False)
 
-    # --- TAB 2: Autonomous (v8 Feature) ---
+    # --- TAB 2: Autonomous Market/Code Audit ---
     with tab_auto:
-        st.info("Ο Αρχιτέκτονας θα σκανάρει όλο το project και θα προτείνει διορθώσεις.")
-        if st.button("🚀 ΕΚΤΕΛΕΣΗ ΑΥΤΟΜΑΤΟΥ ΕΛΕΓΧΟΥ", type="primary"):
-            auto_prompt = "ACT AS AN AUTONOMOUS AUDITOR. Scan all files. Identify the biggest bug or missing feature based on Protected Rules. Write the fix."
-            process_request(sel_model, auto_prompt, False, file_contents, structure, focus_file, True)
+        st.header("🛡️ Commercial Audit")
+        st.markdown("""
+        Ο Αρχιτέκτονας θα σκανάρει το project με τη ματιά ενός **CTO & Product Owner**.
+        Στόχος: **Πώληση & Συνδρομητικό Μοντέλο (SaaS)**.
+        Θα ψάξει για:
+        1. **Scalability:** Αντέχει πολλούς χρήστες;
+        2. **Mobile Readiness:** Θα παίξει σε Android/iOS wrapper;
+        3. **Value Props:** Είναι αρκετά καλό για να πληρώσει κάποιος;
+        """)
+        
+        if st.button("🚀 ΕΚΤΕΛΕΣΗ ΕΜΠΟΡΙΚΟΥ ΔΙΑΓΝΩΣΤΙΚΟΥ", type="primary"):
+            auto_prompt = """
+            ACT AS A CTO & PRODUCT OWNER.
+            MISSION: This project will be sold as a Subscription SaaS (Android/iOS/Windows).
+            1. ANALYZE the entire project code.
+            2. IDENTIFY critical bugs or violations of Protected Rules.
+            3. PROPOSE features that increase COMMERCIAL VALUE.
+            4. IMPLEMENT the most important technical fix immediately.
+            
+            OUTPUT FORMAT:
+            **COMMERCIAL INSIGHT:** (Why this helps selling the app)
+            **TECHNICAL FIX:** (The code change)
+            ### FILE: path/to/file.py
+            ```python
+            ... code ...
+            ```
+            """
+            process_request(sel_model, auto_prompt, False, file_contents, structure, "GLOBAL", True)
 
-    # --- SAVE SECTION (v7.7 Feature) ---
+    # --- SAVE SECTION ---
     if st.session_state.pending_changes:
         st.divider()
         st.success(f"Generated {len(st.session_state.pending_changes)} files.")
@@ -193,19 +227,33 @@ def process_request(model_name, user_in, is_audio, files, structure, focus_file,
     if is_audio: st.session_state.messages.append({"role":"user", "content":"🎤 Audio"})
     elif not is_auto: st.session_state.messages.append({"role":"user", "content":user_in})
     
-    with st.spinner("Thinking..."):
+    with st.spinner("Thinking (Commercial Strategy & Code)..."):
         try:
             full_context = "PROJECT:\n" + "\n".join([f"--- {k} ---\n{v}" for k,v in files.items()])
             
+            # --- COMMERCIAL CEO PROMPT (v12) ---
             prompt = f"""
-            ROLE: Senior Python Architect. Lang: GREEK.
+            ROLE: Senior Python Architect AND Product CEO.
+            LANGUAGE: GREEK (Ελληνικά).
+            
+            MISSION STATEMENT:
+            This software is NOT a hobby project. It is a COMMERCIAL PRODUCT to be sold via SUBSCRIPTION (SaaS).
+            TARGET PLATFORMS: Web, Android, iOS, Windows (Cross-platform capability is key).
+            KEY VALUES: Reliability, Speed, Professional UI, High Perceived Value.
+            
             RULES: {PROTECTED_FEATURES}
-            CONTEXT: {full_context}
-            FOCUS: {focus_file}
+            
+            CONTEXT:
+            {full_context}
+            
+            FOCUS TARGET: {focus_file}
+            
             REQUEST: {user_in if not is_audio else "Transcribe and execute."}
             
-            OUTPUT FORMAT:
-            Explain plan.
+            INSTRUCTIONS:
+            1. If audio, transcribe first.
+            2. ALWAYS think about the end-paying customer.
+            3. RETURN CODE BLOCKS:
             ### FILE: filename.py
             ```python
             code
@@ -215,7 +263,6 @@ def process_request(model_name, user_in, is_audio, files, structure, focus_file,
             parts = [prompt]
             if is_audio: parts.append({"mime_type": "audio/wav", "data": user_in})
             
-            # Use Retry Logic
             resp = generate_with_retry(model_name, parts)
             
             st.session_state.messages.append({"role":"assistant", "content":resp})
