@@ -2,21 +2,18 @@ import streamlit as st
 import os
 import shutil
 import ast
+import re
+import time
 from datetime import datetime
 import google.generativeai as genai
 from streamlit_mic_recorder import mic_recorder
-from PIL import Image
-import io
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ (Dictator Mode) ---
-st.set_page_config(page_title="Architect AI v34 (Final)", page_icon="🏗️", layout="wide")
+# --- 1. ΑΡΧΙΚΕΣ ΡΥΘΜΙΣΕΙΣ ---
+st.set_page_config(page_title="Architect AI v35 (Universal)", page_icon="🚀", layout="wide")
 
-# ΑΠΑΓΟΡΕΥΕΤΑΙ να αλλάξει αυτό. Είναι το μόνο μοντέλο που δουλεύει δωρεάν και γρήγορα.
-TARGET_MODEL = "models/gemini-1.5-flash"
-
-# --- 2. WORKSPACE MANAGER ---
+# --- 2. ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ ΣΥΣΤΗΜΑΤΟΣ ---
 def get_project_context():
-    """Διαβάζει όλα τα αρχεία του project για να ξέρει τι να διορθώσει."""
+    """Σαρώνει τον φάκελο για να δώσει στο AI εικόνα ολόκληρου του project."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     file_contents = {}
     ignore = {'.git', '__pycache__', 'venv', '.streamlit', 'backups', '.DS_Store', 'requirements.txt'} 
@@ -24,7 +21,7 @@ def get_project_context():
     for dirpath, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [d for d in dirnames if d not in ignore]
         for f in filenames:
-            if f in ignore or f.endswith(('.pyc', '.png', '.jpg', '.pdf', '.mp3', '.xlsx')): continue 
+            if f in ignore or f.endswith(('.pyc', '.png', '.jpg', '.pdf', '.mp3', '.xlsx', '.bak')): continue 
             try:
                 path = os.path.join(dirpath, f)
                 rel_path = os.path.relpath(path, root_dir)
@@ -33,143 +30,146 @@ def get_project_context():
             except: pass
     return file_contents
 
-def save_code_changes(response_text):
-    """Εντοπίζει κώδικα στην απάντηση και τον σώζει."""
-    import re
-    # Ψάχνουμε το μοτίβο: ### FILE: όνομα.py ...κώδικας...
+def apply_code_changes(response_text):
+    """Εξάγει τον κώδικα από την απάντηση και ενημερώνει τα αρχεία."""
     pattern = r"### FILE: (.+?)\n.*?```(?:python)?\n(.*?)```"
     matches = re.findall(pattern, response_text, re.DOTALL)
     log = []
     
-    if not matches: return "ℹ️ Δεν βρέθηκαν αλλαγές για αποθήκευση."
+    if not matches: return "ℹ️ Δεν βρέθηκε κώδικας προς αποθήκευση."
 
     for filename, code in matches:
         filename = filename.strip().replace("\\", "/")
         if filename.startswith("./"): filename = filename[2:]
-        
         full_path = os.path.abspath(filename)
         
-        # Backup
+        # Δημιουργία Backup
         if os.path.exists(full_path):
             backup_dir = os.path.join(os.path.dirname(full_path), "backups")
             os.makedirs(backup_dir, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             shutil.copy2(full_path, os.path.join(backup_dir, f"{os.path.basename(full_path)}_{ts}.bak"))
 
-        # Save
         try:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
             with open(full_path, 'w', encoding='utf-8') as f:
                 f.write(code.strip())
-            log.append(f"✅ SAVED: {filename}")
+            log.append(f"✅ UPDATED: {filename}")
         except Exception as e:
-            log.append(f"❌ ERROR: {filename} ({e})")
+            log.append(f"❌ ERROR: {filename} ({str(e)})")
             
     return "\n".join(log)
 
-# --- 3. THE AI ENGINE ---
-def ask_the_architect(strategy, parts, api_key):
-    if not api_key: return "❌ Error: Missing API Key"
+# --- 3. Η ΜΗΧΑΝΗ ΤΟΥ AI (Dynamic Seeker) ---
+def run_ai_logic(parts, api_key):
+    if not api_key: return "❌ Σφάλμα: Λείπει το API Key."
     
     genai.configure(api_key=api_key)
     
     try:
-        # Χρησιμοποιούμε το 1.5 Flash που υποστηρίζει η έκδοση 0.8.0
-        model = genai.GenerativeModel(TARGET_MODEL)
+        # Δυναμική αναζήτηση διαθέσιμων μοντέλων
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-        # Ρυθμίσεις
+        # Επιλογή μοντέλου με σειρά προτεραιότητας
+        selected_model = None
+        for target in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
+            for m in models:
+                if target in m:
+                    selected_model = m
+                    break
+            if selected_model: break
+            
+        if not selected_model:
+            return f"❌ Δεν βρέθηκε συμβατό μοντέλο. Διαθέσιμα: {str(models)}"
+
+        model = genai.GenerativeModel(selected_model)
         config = genai.types.GenerationConfig(temperature=0.2, max_output_tokens=8192)
         
         response = model.generate_content(parts, generation_config=config)
         return response.text
     except Exception as e:
-        err = str(e)
-        if "429" in err: return "⏳ QUOTA ERROR: Πολλά αιτήματα. Περίμενε 1 λεπτό."
-        if "404" in err: return f"❌ ERROR: Δεν βρέθηκε το μοντέλο {TARGET_MODEL}. (Απίθανο με την έκδοση 0.8.0)"
-        return f"❌ AI ERROR: {err}"
+        return f"❌ AI ERROR: {str(e)}"
 
-# --- 4. UI INTERFACE ---
+# --- 4. ΠΕΡΙΒΑΛΛΟΝ ΧΡΗΣΤΗ (UI) ---
 def main():
-    st.title("🏗️ Architect AI v34 (Final Integration)")
+    st.title("🚀 Architect AI v35 (Universal Seeker)")
     
-    # Sidebar
     with st.sidebar:
+        st.header("Ρυθμίσεις")
         api_key = st.text_input("Gemini API Key", type="password")
         if not api_key and "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-            st.success("API Key Loaded")
+            st.success("Το κλειδί φορτώθηκε!")
 
         st.divider()
-        st.caption("Inputs")
-        audio = mic_recorder(start_prompt="🎤 Start", stop_prompt="⏹ Stop", key='mic')
-        uploaded = st.file_uploader("Image/PDF", type=['png','jpg','pdf'], label_visibility="collapsed")
+        st.subheader("🎤 Φωνή & 📂 Αρχεία")
+        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='mic_v35')
+        uploaded = st.file_uploader("Screenshot ή PDF", type=['png','jpg','pdf'], label_visibility="collapsed")
         
         st.divider()
         project_data = get_project_context()
-        files = ["Global Context"] + list(project_data.keys())
-        strategy = st.selectbox("Strategy", ["Feature", "Bug Fix", "Refactor"])
-        focus = st.selectbox("Focus File", files)
-        auto_save = st.checkbox("Auto-Save", value=False)
+        strategy = st.selectbox("Στρατηγική", ["Νέα Λειτουργία", "Διόρθωση Bug", "Βελτίωση Κώδικα"])
+        focus_file = st.selectbox("Αρχείο Εστίασης", ["Ολόκληρο το Project"] + list(project_data.keys()))
+        auto_save = st.checkbox("Αυτόματη Αποθήκευση", value=False)
 
-    # Chat History
-    if "chat" not in st.session_state: st.session_state.chat = []
-    for msg in st.session_state.chat:
-        with st.chat_message(msg["role"]): st.markdown(msg["text"])
+    # Διαχείριση Ιστορικού Chat
+    if "messages" not in st.session_state: st.session_state.messages = []
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    # Input Handling
-    user_text = st.chat_input("Εντολή...")
+    # Είσοδος Χρήστη
+    user_prompt = st.chat_input("Πώς μπορώ να βοηθήσω στο project σήμερα;")
     
-    final_input = None
-    if user_text: final_input = user_text
-    elif audio: final_input = "🎤 Audio Command"
+    if (user_prompt or audio or uploaded) and api_key:
+        input_msg = user_prompt if user_prompt else "Ανάλυση αρχείου/φωνής..."
+        st.session_state.messages.append({"role": "user", "content": input_msg})
+        with st.chat_message("user"): st.markdown(input_msg)
 
-    if (final_input or uploaded) and api_key:
-        # Show User Message
-        display = final_input if final_input else "📂 Media Uploaded"
-        st.session_state.chat.append({"role": "user", "text": display})
-        with st.chat_message("user"): 
-            st.markdown(display)
-            if uploaded: st.caption(f"📎 {uploaded.name}")
-
-        # Prepare Prompt
-        context_str = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:6000]}" for k,v in project_data.items()])
+        # Κατασκευή Context για το AI
+        context_summary = "PROJECT STRUCTURE:\n" + "\n".join([f"--- {name} ---\n{content[:5000]}" for name, content in project_data.items()])
         
-        prompt = f"""
-        ROLE: Senior Python Architect. LANG: GREEK.
-        TASK: {strategy} on {focus}.
-        USER REQUEST: {user_text if user_text else 'Analyze media'}
+        full_prompt = f"""
+        Είσαι ο Senior Architect (Mastro Nek). 
+        ΠΛΑΙΣΙΟ: Εμπορική εφαρμογή HVAC SaaS.
+        ΣΚΟΠΟΣ: {strategy} στο {focus_file}.
         
-        INSTRUCTIONS:
-        1. Return FULL CODE blocks.
-        2. Format: ### FILE: filename.py \n ```python ... ```
+        ΟΔΗΓΙΕΣ:
+        1. Μίλα Ελληνικά.
+        2. Δώσε ΟΛΟΚΛΗΡΩΜΕΝΟ κώδικα για κάθε αρχείο που αλλάζεις.
+        3. Χρησιμοποίησε ΑΚΡΙΒΩΣ αυτό το format για αρχεία:
+        ### FILE: path/to/filename.py
+        ```python
+        (κώδικας)
+        ```
         
-        CONTEXT:
-        {context_str}
+        PROJECT CONTEXT:
+        {context_summary}
+        
+        ΕΝΤΟΛΗ ΧΡΗΣΤΗ: {user_prompt if user_prompt else "Δες τα συνημμένα αρχεία/ήχο."}
         """
-        
-        parts = [prompt]
-        if audio and audio['bytes']: parts.append({"mime_type": "audio/wav", "data": audio['bytes']})
-        if uploaded: 
-            parts.append({"mime_type": uploaded.type, "data": uploaded.getvalue()})
 
-        # Run AI
+        parts = [full_prompt]
+        if audio and audio['bytes']: parts.append({"mime_type": "audio/wav", "data": audio['bytes']})
+        if uploaded: parts.append({"mime_type": uploaded.type, "data": uploaded.getvalue()})
+
+        # Εκτέλεση AI
         with st.chat_message("assistant"):
-            with st.spinner("Processing..."):
-                reply = ask_the_architect(strategy, parts, api_key)
-                st.markdown(reply)
-                st.session_state.chat.append({"role": "assistant", "text": reply})
+            with st.spinner("Ο Αρχιτέκτονας αναλύει το project..."):
+                response = run_ai_logic(parts, api_key)
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
                 
-                # Save
-                if "### FILE:" in reply:
+                # Επιλογή Αποθήκευσης
+                if "### FILE:" in response:
                     if auto_save:
-                        with st.status("Saving..."):
-                            st.code(save_code_changes(reply))
-                            time.sleep(1)
-                            st.rerun()
+                        st.code(apply_code_changes(response))
+                        time.sleep(1)
+                        st.rerun()
                     else:
-                        if st.button("💾 SAVE CHANGES"):
-                            st.code(save_code_changes(reply))
-                            st.success("Saved!")
+                        if st.button("💾 Αποθήκευση Αλλαγών στο Project"):
+                            log = apply_code_changes(response)
+                            st.code(log)
+                            st.success("Οι αλλαγές εφαρμόστηκαν!")
                             time.sleep(1)
                             st.rerun()
 
