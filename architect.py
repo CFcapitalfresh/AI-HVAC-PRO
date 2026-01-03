@@ -15,15 +15,15 @@ except ImportError:
     st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v22 (UI Fix)", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Architect AI v24 (Quota Fix)", page_icon="🛡️", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
-    "1. MICROPHONE/AUDIO: Πάντα κουμπί για φωνητική εντολή στο UI.",
-    "2. PDF UPLOAD: Πάντα υποστήριξη PDF/Images.",
+    "1. MICROPHONE/AUDIO: Πάντα κουμπί για φωνητική εντολή.",
+    "2. VISION: Υποστήριξη Εικόνων (Screenshots) και PDF.",
     "3. MODULARITY: Χρήση imports (core/modules), όχι μονολιθικός κώδικας.",
     "4. ERROR HANDLING: Πάντα try/except blocks και logging.",
-    "5. LANGUAGE: Υποστήριξη GR/EN (get_text).",
+    "5. LANGUAGE: Υποστήριξη GR/EN.",
     "6. STREAMLIT STATE: Έλεγχος initialization keys.",
     "7. DRIVE MANAGER: Προσοχή στο core/drive_manager.py."
 ]
@@ -40,8 +40,8 @@ def get_project_structure():
     for dirpath, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
         for f in filenames:
-            if f in ignore_files or f.endswith(('.pyc', '.png', '.jpg', '.pdf', '.mp3')): 
-                continue
+            if f in ignore_files or f.endswith(('.pyc', '.png', '.jpg', '.jpeg', '.pdf', '.mp3')): 
+                continue 
             
             full_path = os.path.join(dirpath, f)
             rel_path = os.path.relpath(full_path, root_dir)
@@ -68,29 +68,24 @@ def backup_file(file_path):
         print(f"Backup failed: {e}")
     return False
 
-def get_best_available_model(api_key):
-    """AUTO-DISCOVERY ENGINE"""
-    genai.configure(api_key=api_key)
-    try:
-        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        flash_models = [m for m in all_models if "flash" in m.lower() and "1.5" in m]
-        if flash_models: return flash_models[0]
-        pro_models = [m for m in all_models if "pro" in m.lower() and "1.5" in m]
-        if pro_models: return pro_models[0]
-        if all_models: return all_models[0]
-    except: pass
+def get_safe_model_name(api_key):
+    """
+    QUOTA FIX ENGINE:
+    Αντί να ψάχνει τυχαία, επιστρέφει το STABLE μοντέλο με το μεγάλο όριο.
+    Αποφεύγουμε το 2.5 γιατί έχει όριο 20 requests/day.
+    """
     return "models/gemini-1.5-flash"
 
 def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     """SELF-HEALING: Καλεί το AI να διορθώσει το Syntax Error."""
-    target_model = get_best_available_model(api_key)
+    target_model = get_safe_model_name(api_key)
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(target_model)
     
-    config = genai.types.GenerationConfig(temperature=0.1, top_p=0.95, top_k=64, max_output_tokens=8192)
+    config = genai.types.GenerationConfig(temperature=0.1)
     
     prompt = f"""
-    CRITICAL FIX REQUEST (COMMERCIAL GRADE):
+    CRITICAL FIX REQUEST:
     The Python code for '{file_path}' has a SYNTAX ERROR.
     ERROR: {error_msg}
     CODE:
@@ -165,23 +160,45 @@ def apply_changes_from_response(response_text, api_key):
     return "\n".join(results)
 
 def generate_with_auto_pilot(strategy_name, parts, api_key):
-    """Engine"""
+    """
+    ENGINE ME AUTO-RETRY ΓΙΑ 429 ERRORS
+    """
     if not api_key: return "ERROR: Missing API Key."
-    target_model_name = get_best_available_model(api_key)
-    try:
-        model = genai.GenerativeModel(target_model_name)
-        config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
-        safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
-                  ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-        response = model.generate_content(parts, safety_settings=safety, generation_config=config)
-        return response.text
-    except Exception as e:
-        return f"CRITICAL AI ERROR: {str(e)}"
+    
+    target_model_name = get_safe_model_name(api_key)
+    genai.configure(api_key=api_key)
+    
+    max_retries = 3
+    retry_delay = 10 # Δευτερόλεπτα
+    
+    for attempt in range(max_retries):
+        try:
+            model = genai.GenerativeModel(target_model_name)
+            
+            # Αυστηρό config
+            config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
+            safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
+                      ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+            
+            response = model.generate_content(parts, safety_settings=safety, generation_config=config)
+            return response.text
+            
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    retry_delay *= 2 # Exponential backoff (10s, 20s, 40s)
+                    continue
+                else:
+                    return f"CRITICAL QUOTA ERROR: Exceeded limits even after retries. Please wait a minute. ({error_str})"
+            else:
+                return f"CRITICAL AI ERROR: {error_str}"
 
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🏗️ Architect AI v22 (UI Fix)")
+    st.title("🛡️ Architect AI v24 (Quota Fix)")
     
     project_files = get_project_structure()
     file_list = ["None (Global Context)", "architect.py"] + [f for f in project_files.keys() if f != "architect.py"]
@@ -194,13 +211,19 @@ def main():
             st.success("Key loaded from secrets")
         
         st.markdown("---")
-        # --- ΜΕΤΑΚΙΝΗΣΗ AUDIO ΣΤΟ SIDEBAR ΓΙΑ ΣΤΑΘΕΡΟΤΗΤΑ ---
-        st.subheader("🎙️ Voice Command")
-        audio = mic_recorder(start_prompt="Record", stop_prompt="Stop", key='recorder')
+        st.subheader("🎙️ & 📸 Inputs")
+        
+        # Microphone
+        st.caption("Voice Command:")
+        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='recorder_v24')
+        
+        # Image
+        st.caption("Visual Context:")
+        uploaded_file = st.file_uploader("Upload image/pdf", type=['png', 'jpg', 'jpeg', 'pdf'], label_visibility="collapsed")
         
         st.markdown("---")
         st.subheader("🛠️ Tools")
-        selected_strategy = st.selectbox("Strategy", ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation", "Self-Upgrade"])
+        selected_strategy = st.selectbox("Type", ["General Request", "New Feature", "Bug Fix", "Refactoring", "Self-Upgrade"])
         focus_file = st.selectbox("Focus File", file_list, index=0)
         auto_apply = st.checkbox("Auto-Apply Changes", value=False)
         
@@ -214,23 +237,26 @@ def main():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # --- UI FIX: ΤΟ CHAT INPUT ΜΟΝΟ ΤΟΥ ΣΤΟ ΤΕΛΟΣ ---
-    # Το βγάλαμε από τις κολώνες (st.columns) για να μην εξαφανίζεται
-    user_in = st.chat_input("Δώσε εντολή στον Αρχιτέκτονα...")
+    # CHAT INPUT
+    user_in = st.chat_input("Γράψε εντολή...")
 
-    final_input = None
+    final_input_text = None
     is_audio = False
-
+    
     if user_in:
-        final_input = user_in
-    elif audio: 
-        final_input = audio['bytes']
+        final_input_text = user_in
+    elif audio:
         is_audio = True
+        final_input_text = "🎤 Audio Command Sent"
 
-    if final_input and api_key:
+    if (final_input_text or uploaded_file) and api_key:
+        
         if not is_audio:
-            st.session_state.messages.append({"role": "user", "content": final_input})
-            with st.chat_message("user"): st.markdown(final_input)
+            display_text = final_input_text if final_input_text else "🖼️ Image/PDF Request"
+            st.session_state.messages.append({"role": "user", "content": display_text})
+            with st.chat_message("user"): 
+                st.markdown(display_text)
+                if uploaded_file: st.success(f"📎 Attached: {uploaded_file.name}")
         else:
             with st.chat_message("user"): st.write("🎤 Audio sent...")
 
@@ -248,7 +274,8 @@ def main():
         
         INSTRUCTIONS:
         1. Analyze the request.
-        2. Provide FULL COMPLETE CODE blocks.
+        2. If image provided, analyze it.
+        3. Provide FULL COMPLETE CODE blocks.
         
         FORMAT:
         ### FILE: path/to/filename.py
@@ -259,11 +286,12 @@ def main():
         CONTEXT:
         {full_context}
         
-        REQUEST: {user_in if not is_audio else "Audio Command"}
+        REQUEST TEXT: {user_in if user_in else "See attached media."}
         """
 
         parts = [prompt_text]
-        if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
+        if is_audio and audio['bytes']: parts.append({"mime_type": "audio/wav", "data": audio['bytes']})
+        if uploaded_file: parts.append({"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()})
 
         with st.chat_message("assistant"):
             with st.spinner(f"O Αρχιτέκτονας σχεδιάζει..."):
@@ -271,7 +299,6 @@ def main():
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
-                # --- SAVE LOGIC ---
                 if "### FILE:" in response_text:
                     if auto_apply:
                         with st.status("Αυτόματη Εφαρμογή...", expanded=True) as status:
@@ -285,7 +312,6 @@ def main():
                                 status.update(label="Πρόβλημα.", state="error")
                     else:
                         st.info("💡 Βρέθηκαν αλλαγές στον κώδικα.")
-                        # Κουμπί Save
                         if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ ΑΛΛΑΓΩΝ", type="primary", use_container_width=True):
                             with st.status("Αποθήκευση...", expanded=True):
                                 result_log = apply_changes_from_response(response_text, api_key)
