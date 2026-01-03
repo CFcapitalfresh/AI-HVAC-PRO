@@ -87,6 +87,32 @@ if diag_service.api_key and diag_service.model:
     gen_check_result = diag_service.test_ai_generation()
     if gen_check_result["status"] == "success":
         status_write(get_text('diag_ai_test_success', lang).format(response=gen_check_result['message']), "success")
-    else:
-        status_write(get_text('diag_ai_test_fail', lang).format(error=gen_check_result['message']), "error")
+    elif gen_check_result["status"] == "warning":
+        status_write(get_text('diag_ai_test_empty_response', lang), "warning")
+    else: # error
+        status_write(get_text('diag_ai_test_error', lang).format(error=gen_check_result['message']), "error")
+        if "Quota Exceeded" in gen_check_result['message']:
+            st.error(get_text('diag_ai_quota_exceeded', lang))
+        elif "Invalid API Key" in gen_check_result['message']:
+            st.error(get_text('diag_ai_key_invalid', lang))
+        elif "Model not found" in gen_check_result['message']:
+            st.error(get_text('diag_ai_model_not_found', lang))
+        else:
+            st.error(get_text('diag_ai_unknown_error', lang))
         logger.error(f"AI generation test failed: {gen_check_result['message']}") # Rule 4
+else:
+    status_write(get_text('diag_ai_test_error', lang).format(error="AI not configured or model not selected."), "error")
+
+
+# --- CHECK 5: PDF Engine (pypdf) ---
+st.markdown(f"**{get_text('diag_pdf_test', lang)}**")
+pdf_check_result = diag_service.check_pdf_engine()
+if pdf_check_result["status"] == "success":
+    status_write(get_text('diag_pdf_read_success', lang), "success")
+else:
+    status_write(get_text('diag_pdf_read_fail', lang).format(error=pdf_check_result['message']), "error")
+    logger.error(f"PDF engine check failed: {pdf_check_result['message']}") # Rule 4
+
+st.write("\n")
+st.success(get_text('diag_done', lang)) # Use get_text
+st.write(get_text('diag_system_ready_text', lang)) # NEW KEY (if needed)

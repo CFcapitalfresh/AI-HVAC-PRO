@@ -91,9 +91,20 @@ if __name__ == "__main__":
             os.makedirs(folder)
             print(f"📁 Δημιουργήθηκε φάκελος placeholder: '{folder}'")
 
-    parser = argparse.ArgumentParser(description="Σάρωση project και δημιουργία χάρτη/κώδικα.")
-    parser.add_argument("-m", "--map", action="store_true", help="Δημιουργία χάρτη project.")
-    parser.add_argument("-c", "--code", action="store_true", help="Δημιουργία πλήρους κώδικα project.")
+    parser = argparse.ArgumentParser(description="Σαρώνει το project και παράγει αρχεία χάρτη και κώδικα.")
+    parser.add_argument("--map-only", action="store_true", help="Δημιουργεί μόνο το αρχείο PROJECT_MAP.txt.")
+    parser.add_argument("--code-only", action="store_true", help="Δημιουργεί μόνο το αρχείο FULL_PROJECT_CODE.txt.")
+    parser.add_argument("--all", action="store_true", help="Δημιουργεί και τα δύο αρχεία (προεπιλογή αν δεν δοθούν άλλα ορίσματα).")
+    
     args = parser.parse_args()
 
-    scan_project(args.map, args.code)
+    # Καθορίζουμε ποιες ενέργειες θα γίνουν
+    # Αν δεν δοθούν συγκεκριμένα ορίσματα, η προεπιλογή είναι να δημιουργηθούν και τα δύο (--all)
+    if not args.map_only and not args.code_only and not args.all:
+        generate_map_flag = True
+        generate_code_flag = True
+    else:
+        generate_map_flag = args.map_only or args.all
+        generate_code_flag = args.code_only or args.all
+
+    scan_project(generate_map_flag, generate_code_flag)
