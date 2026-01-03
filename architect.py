@@ -15,7 +15,7 @@ except ImportError:
     st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v16 (Self-Healing)", page_icon="❤️‍🩹", layout="wide")
+st.set_page_config(page_title="Architect AI v17 (Restored & Healed)", page_icon="🏛️", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
@@ -69,10 +69,7 @@ def backup_file(file_path):
     return False
 
 def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
-    """
-    SELF-HEALING MODULE:
-    Καλεί το Gemini να διορθώσει το λάθος σύνταξης που έκανε.
-    """
+    """SELF-HEALING MODULE: Καλεί το AI να διορθώσει το Syntax Error."""
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("models/gemini-1.5-flash")
     
@@ -104,11 +101,7 @@ def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
 
 def apply_changes_from_response(response_text, api_key):
     """
-    VERSION 16 - SELF HEALING:
-    1. Βρίσκει τον κώδικα.
-    2. Syntax Check.
-    3. ΑΝ ΑΠΟΤΥΧΕΙ -> Καλεί fix_code_with_ai (μέχρι 2 φορές).
-    4. Σώζει μόνο αν περάσει το τεστ.
+    VERSION 17 - SELF HEALING + ROBUST WRITING
     """
     pattern = r"### FILE: (.+?)\n.*?```(?:python)?\n(.*?)```"
     matches = re.findall(pattern, response_text, re.DOTALL)
@@ -142,29 +135,26 @@ def apply_changes_from_response(response_text, api_key):
                 try:
                     ast.parse(final_code)
                     success = True
-                    break # Όλα καλά, βγαίνουμε από το loop
+                    break 
                 except SyntaxError as e:
                     error_details = f"{e.msg} (Line {e.lineno})"
                     attempts += 1
                     
                     if attempts <= max_retries:
-                        print(f"⚠️ Syntax Error in {file_path}. Attempting Self-Heal {attempts}/{max_retries}...")
-                        # Κλήση στο Γιατρό (AI)
+                        print(f"⚠️ Syntax Error in {file_path}. Healing {attempts}/{max_retries}...")
                         healed_response = fix_code_with_ai(file_path, final_code, error_details, api_key)
                         
                         if healed_response:
-                            # Εξαγωγή του νέου κώδικα από την απάντηση θεραπείας
                             new_matches = re.findall(pattern, healed_response, re.DOTALL)
                             if new_matches:
-                                _, final_code = new_matches[0] # Παίρνουμε τον νέο κώδικα
+                                _, final_code = new_matches[0]
                             else:
-                                break # Το AI δεν επέστρεψε σωστό format
+                                break 
                         else:
-                            break # Απέτυχε η σύνδεση
+                            break 
                     else:
-                        break # Τέλος προσπαθειών
+                        break 
 
-        # --- ΤΕΛΙΚΗ ΕΤΥΜΗΓΟΡΙΑ ---
         if success:
             try:
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -172,25 +162,22 @@ def apply_changes_from_response(response_text, api_key):
                 with open(full_path, 'w', encoding='utf-8') as f:
                     f.write(final_code.strip())
                 
-                if attempts == 0:
-                    results.append(f"✅ UPDATED: {file_path}")
-                else:
-                    results.append(f"❤️‍🩹 HEALED & UPDATED: {file_path} (Μετά από {attempts} διορθώσεις)")
+                msg = f"✅ UPDATED: {file_path}"
+                if attempts > 0: msg += f" (Healed {attempts} times)"
+                results.append(msg)
             except Exception as e:
                 results.append(f"❌ ERROR writing {file_path}: {str(e)}")
         else:
-             results.append(f"💀 DEAD CODE: {file_path} - Το AI απέτυχε να διορθώσει το Syntax Error: {error_details}")
+             results.append(f"💀 DEAD CODE: {file_path} - Failed to heal: {error_details}")
             
     return "\n".join(results)
 
 def generate_with_auto_pilot(strategy_name, parts, api_key):
-    """
-    GEMINI 1.5 FLASH (ΜΟΝΟΔΡΟΜΟΣ)
-    """
+    """GEMINI 1.5 FLASH ENGINE"""
     if not api_key: return "ERROR: Missing API Key."
     genai.configure(api_key=api_key)
 
-    preferred_models = ["gemini-1.5-flash", "models/gemini-1.5-flash", "gemini-1.5-pro"]
+    preferred_models = ["gemini-1.5-flash", "models/gemini-1.5-flash"]
     selected_model_name = "models/gemini-1.5-flash"
 
     try:
@@ -214,8 +201,12 @@ def generate_with_auto_pilot(strategy_name, parts, api_key):
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("❤️‍🩹 Architect AI v16 (Self-Healing)")
+    st.title("🏛️ Architect AI v17 (The Restoration)")
     
+    # --- ΔΙΑΒΑΣΜΑ ΑΡΧΕΙΩΝ ΓΙΑ ΤΟ DROPDOWN ---
+    project_files = get_project_structure()
+    file_list = ["None (Global Context)"] + list(project_files.keys())
+
     with st.sidebar:
         st.header("Settings")
         api_key = st.text_input("Gemini API Key", type="password")
@@ -223,10 +214,24 @@ def main():
             api_key = st.secrets["GEMINI_API_KEY"]
             st.success("Key loaded from secrets")
         
-        # Επιλογή λειτουργίας
-        auto_apply = st.checkbox("Auto-Apply Changes", value=False, help="Ενεργοποιεί την αυτόματη εφαρμογή και το Self-Healing.")
-        
         st.markdown("---")
+        st.subheader("🛠️ Strategy & Focus")
+        
+        # ΕΠΙΛΟΓΕΣ ΠΟΥ ΕΠΕΣΤΡΕΨΑΝ (RESTORED FEATURES)
+        selected_strategy = st.selectbox(
+            "Strategy", 
+            ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation"]
+        )
+        
+        focus_file = st.selectbox(
+            "Focus File (Target)",
+            file_list,
+            index=0
+        )
+
+        st.markdown("---")
+        auto_apply = st.checkbox("Auto-Apply & Self-Heal", value=False, help="Ενεργοποιεί την αυτόματη εφαρμογή και το Self-Healing.")
+        
         st.caption("Active Rules:")
         for rule in PROTECTED_FEATURES: st.caption(rule)
 
@@ -256,18 +261,21 @@ def main():
         else:
             with st.chat_message("user"): st.write("🎤 Audio sent...")
 
-        files = get_project_structure()
-        full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:3000]}..." for k, v in files.items()])
+        # Φτιάχνουμε το Context (Μικρότερο αν έχει επιλεγεί Focus File για οικονομία, ή όλο)
+        full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:4000]}..." for k, v in project_files.items()])
         
+        # PROMPT ENGINEERING ΜΕ ΤΙΣ ΕΠΙΛΟΓΕΣ ΣΟΥ
         prompt_text = f"""
         ROLE: Senior Python Architect (Mastro Nek). LANG: GREEK.
         MISSION: Maintain and upgrade the HVAC Streamlit App.
+        STRATEGY: {selected_strategy}
+        FOCUS FILE: {focus_file if focus_file != "None (Global Context)" else "ALL"}
         RULES: {PROTECTED_FEATURES}
         
         INSTRUCTIONS:
-        1. Analyze the request.
-        2. Provide FULL COMPLETE CODE for the files that need changing.
-        3. Use the format below EXACTLY.
+        1. Analyze the request based on the Strategy.
+        2. If a specific file is focused, prioritize changes there.
+        3. Provide FULL COMPLETE CODE blocks.
         
         FORMAT FOR CHANGES:
         ### FILE: path/to/filename.py
@@ -285,8 +293,9 @@ def main():
         if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
 
         with st.chat_message("assistant"):
-            with st.spinner("O Αρχιτέκτονας ελέγχει τα σχέδια (Gemini 1.5 Flash)..."):
-                response_text = generate_with_auto_pilot("Auto", parts, api_key)
+            with st.spinner(f"O Αρχιτέκτονας εργάζεται ({selected_strategy})..."):
+                # Χρησιμοποιούμε το v16/v17 engine
+                response_text = generate_with_auto_pilot(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
@@ -294,7 +303,6 @@ def main():
                 if auto_apply:
                     with st.status("Έλεγχος & Εφαρμογή Αλλαγών...", expanded=True) as status:
                         st.write("🔍 Έλεγχος Σύνταξης & Self-Healing...")
-                        # Περνάμε και το api_key για να μπορεί να κάνει healing
                         result_log = apply_changes_from_response(response_text, api_key)
                         
                         st.code(result_log)
