@@ -72,13 +72,15 @@ def save_code_to_file(rel_path, new_code):
     except Exception as e:
         return False, str(e)
 
-# --- 4. DYNAMIC MODEL SELECTOR ---
+# --- 4. DYNAMIC MODEL SELECTOR (ΕΔΩ ΕΙΝΑΙ Η "ΕΞΥΠΝΑΔΑ") ---
 def get_optimal_model_name(api_key):
     genai.configure(api_key=api_key)
     try:
+        # Βήμα 1: Ρωτάμε την Google τι έχει διαθέσιμο
         models = list(genai.list_models())
         available_names = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
         
+        # Η λίστα προτίμησής μας (από το καλύτερο στο χειρότερο)
         priority_list = [
             "models/gemini-1.5-flash", 
             "models/gemini-1.5-flash-latest",
@@ -86,12 +88,15 @@ def get_optimal_model_name(api_key):
             "models/gemini-pro"
         ]
 
+        # Βήμα 2: Ψάχνουμε αν υπάρχει το αγαπημένο μας στα διαθέσιμα
         for priority in priority_list:
             if priority in available_names: return priority
 
+        # Βήμα 3: Αν δεν βρούμε τα γνωστά, παίρνουμε όποιο gemini βρούμε
         for name in available_names:
             if "gemini" in name and "vision" not in name: return name
-                
+        
+        # Fallback (Ασφάλεια)
         return "models/gemini-1.5-flash"
     except Exception as e:
         st.error(f"Google API Error: {e}")
@@ -109,16 +114,16 @@ def main():
             # Προσπαθούμε να διαβάσουμε, αλλά αν αποτύχει δεν σκάει η εφαρμογή
             api_key = st.secrets.get("GEMINI_KEY") or st.secrets.get("general", {}).get("GEMINI_KEY")
         except FileNotFoundError:
-            pass # Δεν υπάρχει αρχείο secrets.toml
+            pass # Δεν υπάρχει αρχείο secrets.toml, συνεχίζουμε
         except Exception:
-            pass # Οποιοδήποτε άλλο λάθος με τα secrets
+            pass # Οποιοδήποτε άλλο λάθος
             
         # Αν δεν βρέθηκε αυτόματα, ζητάμε από τον χρήστη να το δώσει
         if not api_key:
             api_key = st.text_input("🔑 API Key (Επικόλληση εδώ)", type="password")
             if not api_key:
                 st.warning("⚠️ Απαιτείται API Key για να ξεκινήσει.")
-                st.stop() # Σταματάμε εδώ μέχρι να δοθεί κλειδί
+                st.stop() # Σταματάμε εδώ ήρεμα, χωρίς crash
         else:
             st.success("✅ API Key: Loaded")
         
@@ -209,6 +214,7 @@ def main():
             
             with st.spinner("🧠 Ανάλυση & Σύνταξη Κώδικα..."):
                 try:
+                    # ΕΔΩ ΚΑΛΟΥΜΕ ΤΗΝ ΕΞΥΠΝΗ ΣΥΝΑΡΤΗΣΗ
                     model_name = get_optimal_model_name(api_key)
                     if not model_name: st.stop()
                     model = genai.GenerativeModel(model_name)
