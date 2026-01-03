@@ -17,6 +17,11 @@ TRANS = {
     'menu_admin': {'gr': "⚙️ Διαχείριση", 'en': "⚙️ Admin Panel"},
     'logout': {'gr': "🚪 Αποσύνδεση", 'en': "🚪 Logout"},
     'new_chat_side': {'gr': "🧹 Νέα Συνομιλία", 'en': "🧹 New Chat"},
+    # --- NEW ADDITIONS FOR MENU IN main.py ---
+    'menu_diagnostics': {'gr': "🔧 Διαγνωστικά", 'en': "🔧 Diagnostics"}, # Added missing key from main.py
+    'menu_licensing': {'gr': "🔑 Διαχείριση Αδειών", 'en': "🔑 Licensing"}, # Added missing key from main.py
+    'menu_tech_specs': {'gr': "📝 Τεχνικές Προδιαγραφές", 'en': "📝 Tech Specs"}, # Added missing key from main.py
+    'menu_help_user': {'gr': "❓ Βοήθεια", 'en': "❓ Help"}, # Added missing key from main.py
 
     # --- DASHBOARD ---
     'dash_welcome': {'gr': "👋 Καλωσήρθες", 'en': "👋 Welcome"},
@@ -102,8 +107,43 @@ TRANS = {
     'diag_no': {'gr': "❌ ΟΧΙ / Συνέχεια", 'en': "❌ NO / Continue"},
     'diag_cancel': {'gr': "⚠️ Ακύρωση", 'en': "⚠️ Cancel"},
     'help_title': {'gr': "Βοήθεια", 'en': "Help"},
+
+    # --- UI Tech Specs (NEW) ---
+    'specs_title': {'gr': "Τεχνικές Προδιαγραφές", 'en': "Technical Specifications"}, # Added missing key from ui_tech_specs.py
+
+    # --- UI Licensing (NEW) ---
+    "lic_page_title": {"gr": "Διαχείριση Άδειας Χρήσης", "en": "License Management"}, # Added missing key from ui_licensing.py
+    "lic_user_section_title": {"gr": "Η Άδειά Σου", "en": "Your License"}, # Added missing key from ui_licensing.py
+    "lic_status_label": {"gr": "Κατάσταση Άδειας:", "en": "License Status:"}, # Added missing key from ui_licensing.py
+    "lic_expiry_label": {"gr": "Ημερομηνία Λήξης:", "en": "Expiration Date:"}, # Added missing key from ui_licensing.py
+    "lic_enter_key": {"gr": "Εισάγετε Κλειδί Άδειας", "en": "Enter License Key"}, # Added missing key from ui_licensing.py
+    "lic_key_ph": {"gr": "XYZ-ABCD-1234-EFGH", "en": "XYZ-ABCD-1234-EFGH"}, # Added missing key from ui_licensing.py
+    "lic_btn_activate": {"gr": "Ενεργοποίηση Άδειας", "en": "Activate License"}, # Added missing key from ui_licensing.py
+    "lic_activation_success": {"gr": "Η άδεια σας ενεργοποιήθηκε επιτυχώς!", "en": "Your license has been activated successfully!"}, # Added missing key from ui_licensing.py
+    "lic_activation_fail": {"gr": "Αποτυχία ενεργοποίησης άδειας. Ελέγξτε το κλειδί.", "en": "License activation failed. Please check the key."}, # Added missing key from ui_licensing.py
+    "lic_admin_section_title": {"gr": "Διαχείριση Αδειών Διαχειριστή", "en": "Admin License Management"}, # Added missing key from ui_licensing.py
+    "lic_admin_user_email": {"gr": "Email Χρήστη", "en": "User Email"}, # Added missing key from ui_licensing.py
+    "lic_admin_current_role": {"gr": "Τρέχων Ρόλος", "en": "Current Role"}, # Added missing key from ui_licensing.py
+    "lic_admin_new_role": {"gr": "Νέος Ρόλος", "en": "New Role"}, # Added missing key from ui_licensing.py
+    "lic_admin_set_expiry": {"gr": "Ορισμός Λήξης", "en": "Set Expiry"}, # Added missing key from ui_licensing.py
+    "lic_admin_btn_update_role": {"gr": "Ενημέρωση Ρόλου", "en": "Update Role"}, # Added missing key from ui_licensing.py
+    "lic_admin_btn_revoke": {"gr": "Απενεργοποίηση", "en": "Deactivate"}, # Added missing key from ui_licensing.py
+    "lic_admin_role_updated": {"gr": "Ο ρόλος του χρήστη ενημερώθηκε.", "en": "User role updated."}, # Added missing key from ui_licensing.py
+    "lic_admin_activation_updated": {"gr": "Η άδεια χρήσης ενημερώθηκε.", "en": "License status updated."}, # Added missing key from ui_licensing.py
+    "lic_admin_error_update": {"gr": "Σφάλμα κατά την ενημέρωση.", "en": "Error during update."}, # Added missing key from ui_licensing.py
+    "lic_admin_all_licenses": {"gr": "Όλες οι Άδειες Χρήσης", "en": "All Licenses"}, # Added missing key from ui_licensing.py
+    "lic_admin_no_licenses": {"gr": "Δεν βρέθηκαν καταχωρημένες άδειες.", "en": "No registered licenses found."}, # Added missing key from ui_licensing.py
+    "lic_admin_filter_users": {"gr": "Φιλτράρισμα Χρηστών...", "en": "Filter Users..."}, # Added missing key from ui_licensing.py
+    "lic_admin_new_license_expiry": {"gr": "Ημερομηνία Λήξης Άδειας", "en": "License Expiry Date"}, # Added missing key from ui_licensing.py
+    "lic_admin_select_role": {"gr": "Επιλέξτε Ρόλο", "en": "Select Role"}, # Added missing key from ui_licensing.py
+    "lic_admin_role_active": {"gr": "Ενεργός", "en": "Active"}, # Added missing key from ui_licensing.py
+    "lic_admin_role_pending": {"gr": "Εκκρεμής", "en": "Pending"}, # Added missing key from ui_licensing.py
+    "lic_admin_role_admin": {"gr": "Διαχειριστής", "en": "Admin"}, # Added missing key from ui_licensing.py
+    "lic_admin_role_inactive": {"gr": "Ανενεργός", "en": "Inactive"}, # Added missing key from ui_licensing.py
+
 }
 
 def get_text(key: str, lang: str = 'gr') -> str:
     """Retrieves text from the language pack based on key and language."""
+    # Ensure this function is robust against missing keys (Rule 5)
     return TRANS.get(key, {}).get(lang, f"[{key}]")
