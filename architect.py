@@ -29,7 +29,7 @@ PROTECTED_FEATURES = [
 
 # --- 3. ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ ---
 def get_project_structure():
-    """Σαρώνει το project αναδρομικά (Deep Scan)."""
+    """Σαρώνει το project αναδρομικά (Deep Scan) με απόλυτα μονοπάτια."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     structure = ""
     file_contents = {}
@@ -53,7 +53,7 @@ def get_project_structure():
     return structure, file_contents, root_dir
 
 def save_code_to_file(rel_path, new_code):
-    """Αποθηκεύει τον κώδικα (Δημιουργεί και φακέλους αν χρειαστεί)."""
+    """Αποθηκεύει τον κώδικα με ασφάλεια (Auto-Create Directories)."""
     try:
         root_dir = os.path.dirname(os.path.abspath(__file__))
         clean_path = rel_path.replace("/", os.sep).replace("\\", os.sep)
@@ -74,6 +74,7 @@ def save_code_to_file(rel_path, new_code):
 
 # --- 4. DYNAMIC MODEL SELECTOR ---
 def get_optimal_model_name(api_key):
+    """Επιλέγει δυναμικά το καλύτερο διαθέσιμο μοντέλο."""
     genai.configure(api_key=api_key)
     try:
         models = list(genai.list_models())
@@ -99,9 +100,9 @@ def get_optimal_model_name(api_key):
 
 # --- 5. MAIN APPLICATION ---
 def main():
-    st.title("🏗️ The Architect (Autonomous)")
+    st.title("🏗️ The Architect (System v8.1)")
     
-    # --- Sidebar ---
+    # --- Sidebar (Safe Secrets) ---
     with st.sidebar:
         api_key = None
         try:
@@ -126,11 +127,11 @@ def main():
 
     # --- Initialization ---
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Γεια! Είμαι σε κατάσταση αναμονής. Δώσε εντολή ή ξεκίνα τον αυτόματο έλεγχο."}]
+        st.session_state.messages = [{"role": "assistant", "content": "Γεια! Είμαι έτοιμος. Δώσε εντολή ή ξεκίνα τον αυτόματο έλεγχο."}]
     if "pending_changes" not in st.session_state: st.session_state.pending_changes = []
     if "last_processed_audio" not in st.session_state: st.session_state.last_processed_audio = None
     
-    # --- Load Files ---
+    # --- Load Files (Deep Scan) ---
     structure, file_contents, root_path = get_project_structure()
     files = sorted(list(file_contents.keys()))
     
@@ -203,12 +204,10 @@ def main():
         
         if st.button("🚀 ΕΚΤΕΛΕΣΗ ΔΙΑΓΝΩΣΤΙΚΟΥ & ΠΡΟΤΑΣΗ ΑΝΑΒΑΘΜΙΣΗΣ", type="primary", use_container_width=True):
             with st.spinner("🕵️ Ο Αρχιτέκτονας μελετάει τον κώδικα..."):
-                # Ετοιμάζουμε το Global Context
                 full_context = "FULL PROJECT:\n"
                 for f, c in file_contents.items():
                     full_context += f"\n--- FILE: {f} ---\n{c}\n"
                 
-                # Αυτόνομο Prompt
                 auto_prompt = """
                 ACT AS AN AUTONOMOUS CODE AUDITOR.
                 1. ANALYZE the entire project code provided in Context.
@@ -248,7 +247,7 @@ def main():
                 st.balloons()
                 st.success("✅ Όλα αποθηκεύτηκαν!")
                 st.session_state.pending_changes = []
-                time.sleep(2)
+                time.sleep(1)
                 st.rerun()
         
         if col_c.button("Ακύρωση"):
@@ -310,5 +309,4 @@ def process_ai_request(api_key, user_input, is_audio, context, structure, is_aut
         st.error(f"AI Error: {e}")
 
 if __name__ == "__main__":
-    try: main()
-    except: st.error(traceback.format_exc())
+    main()
