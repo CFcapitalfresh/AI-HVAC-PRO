@@ -10,98 +10,147 @@ try:
     from openai import OpenAI
     from streamlit_mic_recorder import mic_recorder
 except ImportError:
-    st.error("⚠️ Τρέξε: pip install openai streamlit-mic-recorder")
+    st.error("⚠️ Λείπουν βιβλιοθήκες! Τρέξε: pip install openai streamlit-mic-recorder")
     st.stop()
 
-# --- 1. ΡΥΘΜΙΣΕΙΣ ---
-st.set_page_config(page_title="Mastro Nek v51 (Integrator)", page_icon="🚀", layout="wide")
+# --- 1. ΡΥΘΜΙΣΕΙΣ & ΑΣΦΑΛΕΙΑ ---
+st.set_page_config(page_title="Mastro Nek v52 (DeepSeek Titan)", page_icon="🚀", layout="wide")
 TOKEN_LIMIT = 100000 
 
-def get_inventory():
-    """Σάρωση αρχείων αγνοώντας τις βιβλιοθήκες."""
-    inventory = []
-    for dirpath, dirnames, filenames in os.walk("."):
-        dirnames[:] = [d for d in dirnames if d not in {'.git', '__pycache__', 'venv', 'backups', 'env'}]
-        for f in filenames:
-            if f.endswith(('.py', '.json', '.css', '.txt')):
-                inventory.append(os.path.relpath(os.path.join(dirpath, f), "."))
-    return sorted(inventory)
+def get_api_key():
+    """Ανάκτηση κλειδιού από τα Streamlit Secrets."""
+    if "deepseek" in st.secrets:
+        return st.secrets["deepseek"]["api_key"]
+    return None
 
-# --- 2. Ο ΜΗΧΑΝΙΣΜΟΣ "ΑΠΟΣΤΟΛΟΣ" ---
-def run_deepseek_task(prompt, api_key, files):
-    """Αυτός είναι ο 'Απόστολος' που στέλνει και λαμβάνει δεδομένα."""
+def get_project_files():
+    """Σάρωση αρχείων κώδικα (Αγνοεί venv, git, κλπ)."""
+    files = []
+    ignore = {'.git', '__pycache__', 'venv', 'env', 'backups', '.streamlit'}
+    for dirpath, dirnames, filenames in os.walk("."):
+        dirnames[:] = [d for d in dirnames if d not in ignore]
+        for f in filenames:
+            if f.endswith(('.py', '.json', '.css', '.txt', '.html')):
+                files.append(os.path.relpath(os.path.join(dirpath, f), "."))
+    return sorted(files)
+
+def save_and_git_push(response_text):
+    """Αποθήκευση αλλαγών και αυτόματο GitHub Sync."""
+    pattern = r"### FILE: (.+?)\n.*?```(?:python|json|css)?\n(.*?)```"
+    matches = re.findall(pattern, response_text, re.DOTALL)
+    if not matches: return "ℹ️ Δεν βρέθηκε κώδικας για ενημέρωση."
+    
+    log = []
+    for filename, code in matches:
+        filename = filename.strip().replace("\\", "/")
+        path = os.path.abspath(filename)
+        if os.path.exists(path):
+            os.makedirs("backups", exist_ok=True)
+            shutil.copy2(path, f"backups/{os.path.basename(filename)}_{datetime.now().strftime('%H%M%S')}.bak")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(code.strip())
+            log.append(f"✅ Saved: {filename}")
+        except Exception as e: log.append(f"❌ Error {filename}: {e}")
+    
+    # Git Sync
+    try:
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-m", f"Mastro Nek v52 Update - {datetime.now()}"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        log.append("🚀 GitHub Synced Successfully!")
+    except: log.append("ℹ️ Τοπική αποθήκευση OK (Git sync skip).")
+    return "\n".join(log)
+
+# --- 2. DEEPSEEK CORE (THE APOSTLE) ---
+def call_mastro_nek(prompt, api_key, selected_files):
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     
-    # Συλλογή κώδικα με σεβασμό στο όριο των 100K
+    # Χτίσιμο Context (Max 100K tokens ≈ 400.000 χαρακτήρες)
     context = ""
-    total_chars = 0
-    for f in files:
+    for f in selected_files:
         try:
-            with open(f, 'r', encoding='utf-8') as file:
-                content = file.read()
-                block = f"\n--- ΑΡΧΕΙΟ: {f} ---\n{content}\n"
-                if total_chars + len(block) < (TOKEN_LIMIT * 4): # Πρόχειρος υπολογισμός
+            with open(f, 'r', encoding='utf-8', errors='ignore') as file:
+                block = f"\n--- FILE: {f} ---\n{file.read()}\n"
+                if len(context) + len(block) < 400000:
                     context += block
-                    total_chars += len(block)
                 else: break
         except: continue
 
-    system_msg = """ΕΙΣΑΙ: Ο Μαστρο-Νεκ (Senior AI).
-    ΑΠΟΣΤΟΛΗ: Μετάτρεψε όλο το project να λειτουργεί ΑΠΟΚΛΕΙΣΤΙΚΑ με DeepSeek API.
-    ΚΑΝΟΝΑΣ: Μίλα Ελληνικά. Δώσε Full κώδικα με ### FILE: filename.py"""
+    sys_msg = """Είσαι ο Μαστρο-Νεκ, ο Senior AI Architect. Μίλα Ελληνικά. 
+    Εξήγησε το πλάνο σου και δώσε FULL κώδικα με format: ### FILE: filename.py"""
 
     try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"CONTEXT ΠΡΟΓΡΑΜΜΑΤΟΣ:\n{context}\n\nΕΝΤΟΛΗ: {prompt}"}
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": f"CONTEXT (100K LIMIT):\n{context}\n\nUSER REQUEST: {prompt}"}
             ],
-            temperature=0.1
+            temperature=0.2
         )
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"❌ Σφάλμα: {str(e)}"
+        return res.choices[0].message.content
+    except Exception as e: return f"❌ API Error: {str(e)}"
 
-# --- 3. UI ---
+# --- 3. UI INTERFACE ---
 def main():
-    st.title("🚀 Mastro Nek v51: DeepSeek Integrator")
+    st.title("🚀 Mastro Nek v52 (DeepSeek Native)")
     
-    if "ai_output" not in st.session_state:
-        st.session_state.ai_output = None
+    # Έλεγχος Αυθεντικοποίησης
+    api_key = get_api_key()
+    
+    if "last_ai_res" not in st.session_state: st.session_state.last_ai_res = None
+    if "chat_history" not in st.session_state: st.session_state.chat_history = []
 
-    inventory = get_inventory()
+    inventory = get_project_files()
 
     with st.sidebar:
-        st.header("🔑 Σύνδεση")
-        api_key = st.text_input("DeepSeek API Key", type="password")
+        if api_key:
+            st.success("✅ DeepSeek Connected (Secrets)")
+        else:
+            st.error("⚠️ Το API Key λείπει από τα Secrets!")
+            api_key = st.text_input("Enter API Key manually:", type="password")
+
         st.divider()
-        st.subheader("📁 Έλεγχος Αρχείων")
-        selected = st.multiselect("Επίλεξε αρχεία για 'Αποστολή':", inventory, default=[f for f in inventory if "architect.py" in f or "main.py" in f])
+        st.subheader("📁 Επιλογή Αρχείων")
+        all_code = st.checkbox("Επιλογή ΟΛΩΝ (Code Only)")
+        default_files = inventory if all_code else [f for f in inventory if "architect.py" in f]
+        selected = st.multiselect("Αρχεία για 'Αποστολή':", inventory, default=default_files)
         
-        st.info(f"Όριο: {TOKEN_LIMIT} Tokens")
-        audio = mic_recorder(start_prompt="🎤 Φωνητική Εντολή", stop_prompt="Τέλος", key='mic_v51')
+        st.divider()
+        audio = mic_recorder(start_prompt="🎤 Πες την εντολή", stop_prompt="⏹ Τέλος", key='mic_v52')
+        if st.button("🗑️ Clear"):
+            st.session_state.chat_history = []
+            st.session_state.last_ai_res = None
+            st.rerun()
 
-    # ΚΥΡΙΟ ΠΑΡΑΘΥΡΟ
-    user_msg = st.chat_input("Πες στον Αρχιτέκτονα τι να μετατρέψει...")
+    # Chat Display
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    if (user_msg or audio) and api_key:
-        input_text = user_msg if user_msg else "Εκτέλεση φωνητικής εντολής..."
+    user_query = st.chat_input("Τι θα αλλάξουμε στο HVAC SaaS;")
+
+    if (user_query or audio) and api_key:
+        input_text = user_query if user_query else "Φωνητική εντολή..."
+        st.session_state.chat_history.append({"role": "user", "content": input_text})
+        with st.chat_message("user"): st.markdown(input_text)
+
         with st.chat_message("assistant"):
-            with st.spinner("Ο 'Απόστολος' του Αρχιτέκτονα επεξεργάζεται το project..."):
-                response = run_deepseek_task(input_text, api_key, selected)
+            with st.spinner("Ο 'Απόστολος' αναλύει τον κώδικα..."):
+                response = call_mastro_nek(input_text, api_key, selected)
                 st.markdown(response)
-                st.session_state.ai_output = response
+                st.session_state.last_ai_res = response
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
 
     # ΣΤΑΘΕΡΟ ΚΟΥΜΠΙ ΑΠΟΘΗΚΕΥΣΗΣ
-    if st.session_state.ai_output and "### FILE:" in st.session_state.ai_output:
+    if st.session_state.last_ai_res and "### FILE:" in st.session_state.last_ai_res:
         st.divider()
-        if st.button("💾 ΕΦΑΡΜΟΓΗ & ΣΥΓΧΡΟΝΙΣΜΟΣ ΣΤΟ PROJECT"):
-            # Εδώ τρέχει η αποθήκευση (χρησιμοποιώντας τη λογική των προηγούμενων εκδόσεων)
-            # Θα γράψει τα αρχεία και θα κάνει GitHub Push
-            st.success("Οι αλλαγές εφαρμόστηκαν! Ολόκληρο το σύστημα πλέον 'σκέφτεται' με DeepSeek.")
-            st.session_state.ai_output = None
-            time.sleep(1)
+        if st.button("💾 ΕΦΑΡΜΟΓΗ ΑΛΛΑΓΩΝ & GITHUB SYNC", use_container_width=True):
+            res_msg = save_and_git_push(st.session_state.last_ai_res)
+            st.info(res_msg)
+            st.session_state.last_ai_res = None
+            time.sleep(2)
             st.rerun()
 
 if __name__ == "__main__":
