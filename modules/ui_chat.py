@@ -11,6 +11,7 @@ from core.language_pack import get_text
 from core.ai_engine import AIEngine
 from services.chat_session import ChatSessionService
 from core.drive_manager import DriveManager
+from core.spy_logger import SpyLogger
 
 # Ασφαλής εισαγωγή για το μικρόφωνο
 try:
@@ -25,6 +26,7 @@ def render(user):
     lang = st.session_state.get('lang', 'gr')
     session_srv = ChatSessionService()
     drive = DriveManager()
+    spy_logger = SpyLogger()
 
     # --- DEVICE CONTEXT (SIDEBAR/TOP) ---
     with st.container(border=True):
@@ -45,6 +47,7 @@ def render(user):
                 initial_manuals = session_srv.get_prioritized_manuals(selected_brand, selected_model, user_query="")
                 if initial_manuals:
                     msg = get_text('manuals_found', lang) or f"Found {len(initial_manuals)}"
+                    # Αν το msg έχει placeholder, το κάνουμε format
                     if "{count}" in msg:
                         c3.success(f"✅ {msg.format(count=len(initial_manuals))}")
                     else:
@@ -68,6 +71,7 @@ def render(user):
             st.markdown(msg["content"])
 
     # --- INPUT AREA (TABS) ---
+    # Δημιουργία Tabs για Κείμενο, Φωνή, Upload
     t_text = get_text('tab_text', lang) or "⌨️ Text"
     t_voice = get_text('tab_voice', lang) or "🎙️ Voice"
     t_upload = get_text('tab_upload', lang) or "📎 Upload"
@@ -97,13 +101,18 @@ def render(user):
     # 3. File Upload
     with tab_up:
         lbl_up = get_text('upload_manual_label', lang) or "Upload File"
-        upl = st.file_uploader(lbl_up, type=["pdf", "png", "jpg", "jpeg"], key="chat_file_up")
+        upl = st.file_uploader(
+            lbl_up, 
+            type=["pdf", "png", "jpg", "jpeg"],
+            key="chat_file_up"
+        )
         if upl: 
             uploaded_context = upl
             st.success(f"📎 {upl.name}")
 
     # --- PROCESS INPUT ---
     if user_input:
+        # Εμφάνιση μηνύματος χρήστη
         display_msg = user_input
         if uploaded_context:
             proc_msg = get_text('processing_uploaded_file', lang) or "File: {name}"
@@ -127,13 +136,16 @@ def render(user):
             primary_data = None
             primary_name = ""
             
+            # Περίπτωση 1: Upload χρήστη (Έχει προτεραιότητα)
             if uploaded_context:
                 try:
                     primary_data = uploaded_context.getvalue()
                     primary_name = f"Upload: {uploaded_context.name}"
                 except: pass
+            
+            # Περίπτωση 2: Manual συστήματος (Αν δεν υπάρχει upload)
             elif final_manuals:
-                top_doc = final_manuals[0]
+                top_doc = final_manuals[0] # Παίρνουμε το 1ο (καλύτερο)
                 lbl_study = get_text('studying_sources', lang) or "Studying..."
                 if "{count}" in lbl_study: lbl_study = lbl_study.format(count=1)
                 
@@ -146,13 +158,13 @@ def render(user):
                     except Exception as e:
                         logger.error(f"Download error: {e}")
 
-            # Γ. Κλήση AI (Διόρθωση: Στέλνουμε manual_file, ΟΧΙ manual_list)
+            # Γ. Κλήση AI (Fixed Args: manual_file instead of list)
             lbl_analyzing = get_text('analyzing', lang) or "Analyzing..."
             with st.spinner(lbl_analyzing):
                 try:
                     resp = brain.get_chat_response(
                         st.session_state.messages,
-                        manual_file=primary_data,  # <--- Η ΣΗΜΑΝΤΙΚΗ ΑΛΛΑΓΗ
+                        manual_file=primary_data,  # <--- Η ΣΗΜΑΝΤΙΚΗ ΑΛΛΑΓΗ (Bytes)
                         manual_name=primary_name,
                         lang=lang
                     )
@@ -161,4 +173,4 @@ def render(user):
                 except Exception as e:
                     err_lbl = get_text('ai_engine_error', lang) or "AI Error: {error}"
                     st.error(err_lbl.format(error=str(e)))
-                    logger.error(f"AI Error: {e}")
+                    spy_logger.log_error(f"AI Error: {e}", component="UI_CHAT")
