@@ -15,7 +15,7 @@ except ImportError:
     st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v17 (Restored & Healed)", page_icon="🏛️", layout="wide")
+st.set_page_config(page_title="Architect AI v18 (Auto-Discovery)", page_icon="🧭", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
@@ -68,10 +68,39 @@ def backup_file(file_path):
         print(f"Backup failed: {e}")
     return False
 
-def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
-    """SELF-HEALING MODULE: Καλεί το AI να διορθώσει το Syntax Error."""
+def get_best_available_model(api_key):
+    """
+    🔍 AUTO-DISCOVERY ENGINE
+    Ρωτάει την Google τι μοντέλα έχει και διαλέγει το καλύτερο.
+    Priority: Flash 1.5 -> Pro 1.5 -> Οτιδήποτε άλλο.
+    """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    try:
+        # Λήψη λίστας μοντέλων
+        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 1. Ψάχνουμε για FLASH (Το γρήγορο/δωρεάν)
+        flash_models = [m for m in all_models if "flash" in m.lower() and "1.5" in m]
+        if flash_models: return flash_models[0] # Επιστρέφει π.χ. models/gemini-1.5-flash-latest
+
+        # 2. Αν δεν υπάρχει Flash, ψάχνουμε PRO
+        pro_models = [m for m in all_models if "pro" in m.lower() and "1.5" in m]
+        if pro_models: return pro_models[0]
+
+        # 3. Αν δεν βρούμε τίποτα από τα παραπάνω, επιστρέφουμε το πρώτο διαθέσιμο
+        if all_models: return all_models[0]
+        
+    except Exception as e:
+        print(f"Model Discovery Failed: {e}")
+    
+    # Fallback (Μαντεψιά αν όλα αποτύχουν)
+    return "models/gemini-1.5-flash"
+
+def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
+    """SELF-HEALING: Καλεί το AI να διορθώσει το Syntax Error."""
+    target_model = get_best_available_model(api_key)
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(target_model)
     
     prompt = f"""
     CRITICAL FIX REQUEST:
@@ -101,7 +130,7 @@ def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
 
 def apply_changes_from_response(response_text, api_key):
     """
-    VERSION 17 - SELF HEALING + ROBUST WRITING
+    Εφαρμογή αλλαγών με Syntax Check & Self-Healing Loop.
     """
     pattern = r"### FILE: (.+?)\n.*?```(?:python)?\n(.*?)```"
     matches = re.findall(pattern, response_text, re.DOTALL)
@@ -123,7 +152,7 @@ def apply_changes_from_response(response_text, api_key):
             results.append(f"⛔ SECURITY ALERT: Εκτός φακέλου ({file_path})")
             continue
 
-        # --- LOOP ΑΥΤΟ-ΘΕΡΑΠΕΙΑΣ (MAX 2 RETRIES) ---
+        # --- SELF HEALING LOOP ---
         attempts = 0
         max_retries = 2
         success = False
@@ -143,17 +172,13 @@ def apply_changes_from_response(response_text, api_key):
                     if attempts <= max_retries:
                         print(f"⚠️ Syntax Error in {file_path}. Healing {attempts}/{max_retries}...")
                         healed_response = fix_code_with_ai(file_path, final_code, error_details, api_key)
-                        
                         if healed_response:
                             new_matches = re.findall(pattern, healed_response, re.DOTALL)
                             if new_matches:
                                 _, final_code = new_matches[0]
-                            else:
-                                break 
-                        else:
-                            break 
-                    else:
-                        break 
+                            else: break 
+                        else: break 
+                    else: break 
 
         if success:
             try:
@@ -173,37 +198,31 @@ def apply_changes_from_response(response_text, api_key):
     return "\n".join(results)
 
 def generate_with_auto_pilot(strategy_name, parts, api_key):
-    """GEMINI 1.5 FLASH ENGINE"""
+    """
+    Κύρια μηχανή παραγωγής κώδικα.
+    """
     if not api_key: return "ERROR: Missing API Key."
-    genai.configure(api_key=api_key)
-
-    preferred_models = ["gemini-1.5-flash", "models/gemini-1.5-flash"]
-    selected_model_name = "models/gemini-1.5-flash"
-
+    
+    # --- AUTO DISCOVERY ---
+    target_model_name = get_best_available_model(api_key)
+    
     try:
-        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for p in preferred_models:
-            match = next((m for m in available if p in m), None)
-            if match:
-                selected_model_name = match
-                break
-    except: pass
-
-    try:
-        model = genai.GenerativeModel(selected_model_name)
+        # print(f"DEBUG: Using Model -> {target_model_name}") # Ενεργοποίησε για debugging
+        model = genai.GenerativeModel(target_model_name)
+        
         safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
                   ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+        
         response = model.generate_content(parts, safety_settings=safety)
         return response.text
     except Exception as e:
-        return f"CRITICAL AI ERROR: {str(e)}"
+        return f"CRITICAL AI ERROR: {str(e)} (Tried model: {target_model_name})"
 
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🏛️ Architect AI v17 (The Restoration)")
+    st.title("🧭 Architect AI v18 (Auto-Discovery)")
     
-    # --- ΔΙΑΒΑΣΜΑ ΑΡΧΕΙΩΝ ΓΙΑ ΤΟ DROPDOWN ---
     project_files = get_project_structure()
     file_list = ["None (Global Context)"] + list(project_files.keys())
 
@@ -217,7 +236,6 @@ def main():
         st.markdown("---")
         st.subheader("🛠️ Strategy & Focus")
         
-        # ΕΠΙΛΟΓΕΣ ΠΟΥ ΕΠΕΣΤΡΕΨΑΝ (RESTORED FEATURES)
         selected_strategy = st.selectbox(
             "Strategy", 
             ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation"]
@@ -261,10 +279,8 @@ def main():
         else:
             with st.chat_message("user"): st.write("🎤 Audio sent...")
 
-        # Φτιάχνουμε το Context (Μικρότερο αν έχει επιλεγεί Focus File για οικονομία, ή όλο)
         full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:4000]}..." for k, v in project_files.items()])
         
-        # PROMPT ENGINEERING ΜΕ ΤΙΣ ΕΠΙΛΟΓΕΣ ΣΟΥ
         prompt_text = f"""
         ROLE: Senior Python Architect (Mastro Nek). LANG: GREEK.
         MISSION: Maintain and upgrade the HVAC Streamlit App.
@@ -273,8 +289,8 @@ def main():
         RULES: {PROTECTED_FEATURES}
         
         INSTRUCTIONS:
-        1. Analyze the request based on the Strategy.
-        2. If a specific file is focused, prioritize changes there.
+        1. Analyze the request.
+        2. Prioritize changes in FOCUS FILE.
         3. Provide FULL COMPLETE CODE blocks.
         
         FORMAT FOR CHANGES:
@@ -293,13 +309,11 @@ def main():
         if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
 
         with st.chat_message("assistant"):
-            with st.spinner(f"O Αρχιτέκτονας εργάζεται ({selected_strategy})..."):
-                # Χρησιμοποιούμε το v16/v17 engine
+            with st.spinner(f"O Αρχιτέκτονας σκανάρει τα μοντέλα & εργάζεται..."):
                 response_text = generate_with_auto_pilot(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
-                # --- AUTO APPLY LOGIC (WITH SELF HEALING) ---
                 if auto_apply:
                     with st.status("Έλεγχος & Εφαρμογή Αλλαγών...", expanded=True) as status:
                         st.write("🔍 Έλεγχος Σύνταξης & Self-Healing...")
@@ -312,7 +326,7 @@ def main():
                             time.sleep(1)
                             st.rerun()
                         elif "DEAD CODE" in result_log:
-                            status.update(label="⛔ Αποτυχία: Το Self-Healing δεν μπόρεσε να φτιάξει το λάθος.", state="error", expanded=True)
+                            status.update(label="⛔ Αποτυχία Self-Healing.", state="error", expanded=True)
                         else:
                             status.update(label="Δεν βρέθηκαν αλλαγές προς εφαρμογή.", state="complete")
 
