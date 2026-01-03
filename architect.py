@@ -4,147 +4,204 @@ import shutil
 import re
 import time
 import subprocess
+import json
 from datetime import datetime
+from pathlib import Path
 
 try:
     from openai import OpenAI
     from streamlit_mic_recorder import mic_recorder
+    import speech_recognition as sr
+    from io import BytesIO
 except ImportError:
-    st.error("⚠️ Τρέξε: pip install openai streamlit-mic-recorder")
+    st.error("⚠️ Τρέξε: pip install openai streamlit-mic-recorder SpeechRecognition")
     st.stop()
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ ---
 st.set_page_config(page_title="Mastro Nek v48 (Smart Select)", page_icon="🏗️", layout="wide")
+
+# Αρχικοποίηση session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "file_history" not in st.session_state:
+    st.session_state.file_history = []
+if "backup_list" not in st.session_state:
+    st.session_state.backup_list = []
 
 def get_project_inventory():
     """Σαρώνει το project και επιστρέφει ΜΟΝΟ τον κώδικα, αγνοώντας βιβλιοθήκες."""
     inventory = []
     # Λίστα φακέλων που ΠΡΕΠΕΙ να αγνοούμε (Βιβλιοθήκες, Git, κλπ)
     ignore_list = {'.git', '__pycache__', 'venv', 'env', '.venv', 'node_modules', 'backups', '.streamlit'}
-    
+
     for dirpath, dirnames, filenames in os.walk("."):
         # Αφαιρούμε τους φακέλους ignore από την αναζήτηση
         dirnames[:] = [d for d in dirnames if d not in ignore_list]
-        
+
         for f in filenames:
             # Κρατάμε μόνο αρχεία κώδικα και ρυθμίσεων
-            if f.endswith(('.py', '.json', '.css', '.txt', '.md', '.html')):
+            if f.endswith(('.py', '.json', '.css', '.txt', '.md', '.html', '.js', '.ts', '.yml', '.yaml')):
                 rel_path = os.path.relpath(os.path.join(dirpath, f), ".")
                 inventory.append(rel_path)
     return sorted(inventory)
 
 def read_files(paths):
+    """Διαβάζει τα επιλεγμένα αρχεία και επιστρέφει το περιεχόμενό τους."""
     context = ""
     for path in paths:
         try:
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 context += f"\n--- ΑΡΧΕΙΟ: {path} ---\n{f.read()}\n"
-        except: pass
+        except Exception as e:
+            context += f"\n--- ΑΡΧΕΙΟ: {path} ---\n[Σφάλμα ανάγνωσης: {str(e)}]\n"
     return context
 
+def preview_file(filepath):
+    """Εμφανίζει προεπισκόπηση ενός αρχείου."""
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            lines = content.split('\n')
+            return "\n".join(lines[:50]) + ("\n..." if len(lines) > 50 else "")
+    except:
+        return "[Δεν μπορεί να προβληθεί]"
+
+def create_backup(filename):
+    """Δημιουργεί backup ενός αρχείου."""
+    if not os.path.exists(filename):
+        return None
+
+    backup_dir = "backups"
+    os.makedirs(backup_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_name = f"{os.path.basename(filename)}_{timestamp}.bak"
+    backup_path = os.path.join(backup_dir, backup_name)
+
+    shutil.copy2(filename, backup_path)
+
+    # Προσθήκη στο ιστορικό
+    backup_info = {
+        "original": filename,
+        "backup": backup_path,
+        "timestamp": timestamp,
+        "size": os.path.getsize(filename)
+    }
+    st.session_state.backup_list.append(backup_info)
+
+    return backup_path
+
 def apply_updates_and_sync(text):
-    pattern = r"### FILE: (.+?)\n.*?```(?:python|json|css)?\n(.*?)```"
+    """Εφαρμόζει τις αλλαγές από την AI και κάνει Git sync."""
+    pattern = r"### FILE: (.+?)\n.*?```(?:python|json|css|javascript|typescript|html)?\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
-    if not matches: return "ℹ️ Δεν βρέθηκε κώδικας."
-    
+
+    if not matches:
+        # Προσπάθεια με εναλλακτικό pattern
+        pattern2 = r"--- ΑΡΧΕΙΟ: (.+?) ---\n(.*?)(?=\n--- ΑΡΧΕΙΟ: |\Z)"
+        matches = re.findall(pattern2, text, re.DOTALL)
+
+    if not matches:
+        return "ℹ️ Δεν βρέθηκε κώδικας για ενημέρωση."
+
     log = []
+    updated_files = []
+
     for filename, code in matches:
         filename = filename.strip().replace("\\", "/")
-        full_path = os.path.abspath(filename)
-        if os.path.exists(full_path):
-            os.makedirs("backups", exist_ok=True)
-            shutil.copy2(full_path, f"backups/{os.path.basename(filename)}_{datetime.now().strftime('%H%M%S')}.bak")
+
+        # Καθαρισμός του κώδικα από επιπλέον κενά
+        code = code.strip()
+
+        # Δημιουργία backup πριν την αλλαγή
+        if os.path.exists(filename):
+            backup_path = create_backup(filename)
+            if backup_path:
+                log.append(f"📦 Backup δημιουργήθηκε: {os.path.basename(backup_path)}")
+
         try:
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(code.strip())
-            log.append(f"✅ Ενημερώθηκε το {filename}")
-        except Exception as e: log.append(f"❌ Σφάλμα: {e}")
-    
+            # Δημιουργία φακέλων αν δεν υπάρχουν
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+            # Εγγραφή του νέου κώδικα
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(code)
+
+            log.append(f"✅ Ενημερώθηκε το: {filename}")
+            updated_files.append(filename)
+
+            # Προσθήκη στο ιστορικό
+            st.session_state.file_history.append({
+                "file": filename,
+                "action": "update",
+                "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "size": len(code)
+            })
+
+        except Exception as e:
+            log.append(f"❌ Σφάλμα στο {filename}: {str(e)}")
+
     # Αυτόματο Git Sync
-    try:
-        subprocess.run(["git", "add", "."], check=True)
-        subprocess.run(["git", "commit", "-m", "Auto-update by Mastro Nek"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        log.append("🚀 Συγχρονίστηκε με το GitHub!")
-    except:
-        log.append("ℹ️ Τοπική αποθήκευση OK (Git sync skip).")
+    if updated_files:
+        try:
+            # Προσθήκη των αρχείων
+            subprocess.run(["git", "add", "."], check=True, capture_output=True)
+
+            # Commit
+            commit_msg = f"Auto-update by Mastro Nek: {', '.join([os.path.basename(f) for f in updated_files[:3]])}"
+            if len(updated_files) > 3:
+                commit_msg += f" και άλλα {len(updated_files)-3}"
+
+            result = subprocess.run(["git", "commit", "-m", commit_msg], 
+                                  check=True, capture_output=True, text=True)
+            log.append(f"📝 Commit: {commit_msg}")
+
+            # Push
+            push_result = subprocess.run(["git", "push"], 
+                                       check=True, capture_output=True, text=True)
+            log.append("🚀 Συγχρονίστηκε με το GitHub!")
+
+        except subprocess.CalledProcessError as e:
+            log.append(f"ℹ️ Git error: {e.stderr}")
+        except Exception as e:
+            log.append(f"ℹ️ Τοπική αποθήκευση OK (Git sync skip: {str(e)})")
+
     return "\n".join(log)
+
+def process_audio(audio_bytes):
+    """Μετατρέπει τον ήχο σε κείμενο."""
+    if not audio_bytes:
+        return None
+
+    try:
+        # Δημιουργία recognizer
+        recognizer = sr.Recognizer()
+
+        # Μετατροπή bytes σε AudioData
+        audio_data = sr.AudioData(audio_bytes, sample_rate=44100, sample_width=2)
+
+        # Αναγνώριση ομιλίας (Ελληνικά)
+        text = recognizer.recognize_google(audio_data, language="el-GR")
+        return text
+    except sr.UnknownValueError:
+        return "Δεν κατάλαβα την ομιλία"
+    except sr.RequestError as e:
+        return f"Σφάλση στην υπηρεσία αναγνώρισης: {e}"
+    except Exception as e:
+        return f"Σφάλμα επεξεργασίας ήχου: {str(e)}"
 
 # --- 2. ENGINE ---
 def run_deepseek(prompt, api_key, context):
+    """Καλεί το DeepSeek API για επεξεργασία."""
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-    system_msg = "Είσαι ο Mastro Nek. Μίλα Ελληνικά. Εξήγησε το πλάνο σου και δώσε FULL κώδικα με ### FILE: filename.py"
-    try:
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"CONTEXT:\n{context}\n\nUSER REQUEST: {prompt}"}
-            ],
-            temperature=0.3
-        )
-        return response.choices[0].message.content
-    except Exception as e: return f"❌ Σφάλμα AI: {str(e)}"
 
-# --- 3. UI ---
-def main():
-    st.title("🏗️ Mastro Nek v48 (Smart Selection)")
-    
-    inventory = get_project_inventory()
-    
-    with st.sidebar:
-        st.header("Ρυθμίσεις")
-        api_key = st.text_input("DeepSeek API Key", type="password")
-        
-        st.divider()
-        st.subheader("📁 Διαχείριση Αρχείων")
-        
-        # ΕΥΚΟΛΙΑ: Κουμπί για επιλογή όλων των αρχείων κώδικα
-        select_all = st.checkbox("Επιλογή όλων των αρχείων κώδικα (Χωρίς βιβλιοθήκες)")
-        
-        default_selection = inventory if select_all else [f for f in inventory if "architect.py" in f]
-        
-        selected_files = st.multiselect(
-            "Επίλεξε αρχεία για ανάλυση:", 
-            options=inventory, 
-            default=default_selection
-        )
-        
-        st.divider()
-        st.write("🎤 Φωνητική Εντολή (GR):")
-        audio = mic_recorder(start_prompt="Ξεκίνα (Ελληνικά)", stop_prompt="Τέλος", key='mic_v48')
-        
-        if st.button("🗑️ Καθαρισμός Chat"):
-            st.session_state.messages = []
-            st.rerun()
+    system_msg = """Είσαι ο Mastro Nek, ένας έξυπνος βοηθός προγραμματιστή που μιλάει Ελληνικά.
 
-    if "messages" not in st.session_state: st.session_state.messages = []
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
-
-    user_input = st.chat_input("Τι θα φτιάξουμε σήμερα;")
-    
-    if (user_input or audio) and api_key:
-        prompt = user_input if user_input else "Φωνητική εντολή..."
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
-
-        context = read_files(selected_files)
-        
-        with st.chat_message("assistant"):
-            with st.spinner("Ο Μαστρο-Νεκ αναλύει τον κώδικα..."):
-                response = run_deepseek(prompt, api_key, context)
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                
-                if "### FILE:" in response:
-                    st.divider()
-                    if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ & GITHUB PUSH"):
-                        res = apply_updates_and_sync(response)
-                        st.info(res)
-                        time.sleep(1)
-                        st.rerun()
-
-if __name__ == "__main__":
-    main()
+Οδηγίες:
+1. Μίλα πάντα Ελληνικά
+2. Εξήγησε πρώτα το πλάνο σου
+3. Πρότεινε βελτιώσεις
+4. Γράψε πλήρη κώδικα με τη μορφή:
+### FILE: filename.extension
+```language
+ο κώδικας εδώ
