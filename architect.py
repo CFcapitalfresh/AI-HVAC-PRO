@@ -15,7 +15,7 @@ except ImportError:
     st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v18 (Auto-Discovery)", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="Architect AI v20 (Self-Evolution)", page_icon="🧬", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
@@ -31,11 +31,12 @@ PROTECTED_FEATURES = [
 # --- 3. HELPER FUNCTIONS ---
 
 def get_project_structure():
-    """Διαβάζει τη δομή του φακέλου."""
+    """Διαβάζει τη δομή του φακέλου (ΣΥΜΠΕΡΙΛΑΜΒΑΝΟΜΕΝΟΥ ΤΟΥ ΕΑΥΤΟΥ ΤΟΥ)."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     file_contents = {}
     ignore_dirs = {'.git', '__pycache__', 'venv', '.streamlit', 'backups'} 
-    ignore_files = {'.DS_Store', 'token.json', 'credentials.json', 'architect.py', 'secrets.toml'} 
+    # ΑΦΑΙΡΕΣΑΜΕ ΤΟ architect.py ΑΠΟ ΤΑ IGNORED FILES
+    ignore_files = {'.DS_Store', 'token.json', 'credentials.json', 'secrets.toml'} 
 
     for dirpath, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
@@ -69,31 +70,16 @@ def backup_file(file_path):
     return False
 
 def get_best_available_model(api_key):
-    """
-    🔍 AUTO-DISCOVERY ENGINE
-    Ρωτάει την Google τι μοντέλα έχει και διαλέγει το καλύτερο.
-    Priority: Flash 1.5 -> Pro 1.5 -> Οτιδήποτε άλλο.
-    """
+    """AUTO-DISCOVERY ENGINE"""
     genai.configure(api_key=api_key)
     try:
-        # Λήψη λίστας μοντέλων
         all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # 1. Ψάχνουμε για FLASH (Το γρήγορο/δωρεάν)
         flash_models = [m for m in all_models if "flash" in m.lower() and "1.5" in m]
-        if flash_models: return flash_models[0] # Επιστρέφει π.χ. models/gemini-1.5-flash-latest
-
-        # 2. Αν δεν υπάρχει Flash, ψάχνουμε PRO
+        if flash_models: return flash_models[0]
         pro_models = [m for m in all_models if "pro" in m.lower() and "1.5" in m]
         if pro_models: return pro_models[0]
-
-        # 3. Αν δεν βρούμε τίποτα από τα παραπάνω, επιστρέφουμε το πρώτο διαθέσιμο
         if all_models: return all_models[0]
-        
-    except Exception as e:
-        print(f"Model Discovery Failed: {e}")
-    
-    # Fallback (Μαντεψιά αν όλα αποτύχουν)
+    except: pass
     return "models/gemini-1.5-flash"
 
 def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
@@ -103,24 +89,14 @@ def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     model = genai.GenerativeModel(target_model)
     
     prompt = f"""
-    CRITICAL FIX REQUEST:
-    I tried to run the Python code you generated for file '{file_path}', but it failed with a SYNTAX ERROR.
-    
-    ERROR MESSAGE:
-    {error_msg}
-    
-    THE BAD CODE:
+    CRITICAL FIX REQUEST (COMMERCIAL GRADE):
+    The Python code for '{file_path}' has a SYNTAX ERROR.
+    ERROR: {error_msg}
+    CODE:
     ```python
     {bad_code}
     ```
-    
-    MISSION:
-    Fix the syntax error. Return ONLY the corrected code block.
-    Format:
-    ### FILE: {file_path}
-    ```python
-    # Corrected code here
-    ```
+    Fix it immediately. Return ONLY the corrected code block.
     """
     try:
         response = model.generate_content(prompt)
@@ -138,7 +114,7 @@ def apply_changes_from_response(response_text, api_key):
     results = []
     
     if not matches:
-        return "ℹ️ Δεν βρέθηκαν αλλαγές κώδικα για εφαρμογή."
+        return "ℹ️ Δεν βρέθηκαν αλλαγές κώδικα."
 
     for file_path, code_content in matches:
         file_path = file_path.strip()
@@ -168,14 +144,11 @@ def apply_changes_from_response(response_text, api_key):
                 except SyntaxError as e:
                     error_details = f"{e.msg} (Line {e.lineno})"
                     attempts += 1
-                    
                     if attempts <= max_retries:
-                        print(f"⚠️ Syntax Error in {file_path}. Healing {attempts}/{max_retries}...")
                         healed_response = fix_code_with_ai(file_path, final_code, error_details, api_key)
                         if healed_response:
                             new_matches = re.findall(pattern, healed_response, re.DOTALL)
-                            if new_matches:
-                                _, final_code = new_matches[0]
+                            if new_matches: _, final_code = new_matches[0]
                             else: break 
                         else: break 
                     else: break 
@@ -186,7 +159,6 @@ def apply_changes_from_response(response_text, api_key):
                 backup_file(full_path)
                 with open(full_path, 'w', encoding='utf-8') as f:
                     f.write(final_code.strip())
-                
                 msg = f"✅ UPDATED: {file_path}"
                 if attempts > 0: msg += f" (Healed {attempts} times)"
                 results.append(msg)
@@ -198,33 +170,26 @@ def apply_changes_from_response(response_text, api_key):
     return "\n".join(results)
 
 def generate_with_auto_pilot(strategy_name, parts, api_key):
-    """
-    Κύρια μηχανή παραγωγής κώδικα.
-    """
+    """Engine"""
     if not api_key: return "ERROR: Missing API Key."
-    
-    # --- AUTO DISCOVERY ---
     target_model_name = get_best_available_model(api_key)
-    
     try:
-        # print(f"DEBUG: Using Model -> {target_model_name}") # Ενεργοποίησε για debugging
         model = genai.GenerativeModel(target_model_name)
-        
         safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
                   ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
-        
         response = model.generate_content(parts, safety_settings=safety)
         return response.text
     except Exception as e:
-        return f"CRITICAL AI ERROR: {str(e)} (Tried model: {target_model_name})"
+        return f"CRITICAL AI ERROR: {str(e)}"
 
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🧭 Architect AI v18 (Auto-Discovery)")
+    st.title("🧬 Architect AI v20 (Self-Evolution)")
     
     project_files = get_project_structure()
-    file_list = ["None (Global Context)"] + list(project_files.keys())
+    # Προσθέτουμε και το 'architect.py' ρητά στη λίστα
+    file_list = ["None (Global Context)", "architect.py"] + [f for f in project_files.keys() if f != "architect.py"]
 
     with st.sidebar:
         st.header("Settings")
@@ -238,7 +203,7 @@ def main():
         
         selected_strategy = st.selectbox(
             "Strategy", 
-            ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation"]
+            ["General Request", "New Feature", "Bug Fix", "Refactoring", "Documentation", "Self-Upgrade"]
         )
         
         focus_file = st.selectbox(
@@ -248,7 +213,7 @@ def main():
         )
 
         st.markdown("---")
-        auto_apply = st.checkbox("Auto-Apply & Self-Heal", value=False, help="Ενεργοποιεί την αυτόματη εφαρμογή και το Self-Healing.")
+        auto_apply = st.checkbox("Auto-Apply Changes", value=False, help="Αν κλειστό, θα εμφανιστεί κουμπί 'SAVE' στο τέλος.")
         
         st.caption("Active Rules:")
         for rule in PROTECTED_FEATURES: st.caption(rule)
@@ -279,19 +244,24 @@ def main():
         else:
             with st.chat_message("user"): st.write("🎤 Audio sent...")
 
-        full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:4000]}..." for k, v in project_files.items()])
+        full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:5000]}..." for k, v in project_files.items()])
         
         prompt_text = f"""
-        ROLE: Senior Python Architect (Mastro Nek). LANG: GREEK.
-        MISSION: Maintain and upgrade the HVAC Streamlit App.
+        ROLE: Elite Senior Python Architect (Mastro Nek). 
+        CONTEXT: COMMERCIAL SAAS APPLICATION (HVAC).
+        TARGET PLATFORMS: Android, iOS, Windows, Web.
+        GOAL: Profitability, Scalability, Clean Architecture.
+        SELF-AWARENESS: You can see and modify your own source code (architect.py).
+        LANG: GREEK.
+        
         STRATEGY: {selected_strategy}
         FOCUS FILE: {focus_file if focus_file != "None (Global Context)" else "ALL"}
         RULES: {PROTECTED_FEATURES}
         
         INSTRUCTIONS:
-        1. Analyze the request.
+        1. Analyze the request with a COMMERCIAL mindset (Stability, Speed).
         2. Prioritize changes in FOCUS FILE.
-        3. Provide FULL COMPLETE CODE blocks.
+        3. Provide FULL COMPLETE CODE blocks ready for production.
         
         FORMAT FOR CHANGES:
         ### FILE: path/to/filename.py
@@ -309,26 +279,38 @@ def main():
         if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
 
         with st.chat_message("assistant"):
-            with st.spinner(f"O Αρχιτέκτονας σκανάρει τα μοντέλα & εργάζεται..."):
+            with st.spinner(f"O Αρχιτέκτονας σχεδιάζει (Commercial SaaS Mode)..."):
                 response_text = generate_with_auto_pilot(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
-                if auto_apply:
-                    with st.status("Έλεγχος & Εφαρμογή Αλλαγών...", expanded=True) as status:
-                        st.write("🔍 Έλεγχος Σύνταξης & Self-Healing...")
-                        result_log = apply_changes_from_response(response_text, api_key)
-                        
-                        st.code(result_log)
-                        
-                        if "UPDATED" in result_log:
-                            status.update(label="Επιτυχία! Ο κώδικας ενημερώθηκε.", state="complete", expanded=False)
-                            time.sleep(1)
-                            st.rerun()
-                        elif "DEAD CODE" in result_log:
-                            status.update(label="⛔ Αποτυχία Self-Healing.", state="error", expanded=True)
-                        else:
-                            status.update(label="Δεν βρέθηκαν αλλαγές προς εφαρμογή.", state="complete")
+                # --- SAVE LOGIC ---
+                has_code = "### FILE:" in response_text
+                
+                if has_code:
+                    if auto_apply:
+                        with st.status("Αυτόματη Εφαρμογή...", expanded=True) as status:
+                            result_log = apply_changes_from_response(response_text, api_key)
+                            st.code(result_log)
+                            if "UPDATED" in result_log:
+                                status.update(label="Επιτυχία!", state="complete", expanded=False)
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                status.update(label="Πρόβλημα.", state="error")
+                    else:
+                        st.info("💡 Βρέθηκαν αλλαγές στον κώδικα.")
+                        if st.button("💾 ΑΠΟΘΗΚΕΥΣΗ ΑΛΛΑΓΩΝ (SAVE)", type="primary", use_container_width=True):
+                            with st.status("Αποθήκευση...", expanded=True):
+                                result_log = apply_changes_from_response(response_text, api_key)
+                                st.code(result_log)
+                            
+                            if "UPDATED" in result_log:
+                                st.success("✅ Όλα αποθηκεύτηκαν επιτυχώς!")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.error("❌ Δεν έγινε αποθήκευση (δείτε το log).")
 
 if __name__ == "__main__":
     main()

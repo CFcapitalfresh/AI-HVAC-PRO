@@ -2,18 +2,12 @@
 MODULE: Search Engine System
 VERSION: 2.1.0 (TITANIUM)
 DESCRIPTION: Μηχανή αναζήτησης στα Manuals της μνήμης (Session State).
-ENHANCEMENT: Added Speech-to-Text Button.
+ENHANCEMENT: Added Speech-to-Text Button Placeholder.
 """
 
 import streamlit as st
 import logging
 from typing import List, Dict, Any
-
-# Import Speech-to-Text library with graceful error handling (Rule 1)
-try:
-    from streamlit_mic_recorder import mic_recorder
-except ImportError:
-    mic_recorder = None
 
 logger = logging.getLogger("Module_Search")
 
@@ -55,42 +49,27 @@ def render_search_page(library_data: List[Dict[str, Any]]) -> None:
 
     # 3. Μπάρα Αναζήτησης με Φωνητική Εντολή
     search_col, stt_col = st.columns([8, 1])
-    
-    current_search_input = st.session_state.get("library_search_input_text", "")
-
     with search_col:
         query = st.text_input("🔎 Αναζήτηση (Μάρκα, Μοντέλο, Κωδικός Error)...", 
-                             placeholder="π.χ. Daikin Altherma J3 Error", 
-                             key="library_search_input",
-                             value=current_search_input).strip().lower()
-        # Update session state for internal use, in case mic_recorder updates it
-        st.session_state.library_search_input_text = query
+                             placeholder="π.χ. Daikin Altherma J3 Error", key="library_search_input").strip().lower()
     
     with stt_col:
         st.write("") # Για ευθυγράμμιση
         st.write("")
         # Rule 1: Microphone/Audio button
-        if mic_recorder:
-            audio_bytes = mic_recorder(start_prompt="🎤", stop_prompt="⏹️", key="search_stt_button")
-            if audio_bytes:
-                st.info("🎧 Audio received. Processing...")
-                # Placeholder for actual Speech-to-Text integration
-                # In a real application, this would call a STT service
-                # For example: text_output = speech_to_text(audio_bytes)
-                #              st.session_state.library_search_input_text = text_output
-                #              st.rerun() # Re-run to update search input field
-        else:
-            st.button("🎤", key="stt_button_placeholder_search")
+        if st.button("🎤", key="stt_button"):
+            # Placeholder for actual Speech-to-Text integration
             st.info("🎧 Λειτουργία φωνητικής αναζήτησης υπό ανάπτυξη...")
-
+            # In a real application, this would call a STT service
+            # For example: audio_input = get_audio_input()
+            #              text_output = speech_to_text(audio_input)
+            #              st.session_state.library_search_input = text_output
+            #              st.experimental_rerun() # Or manually update the text_input widget if possible
 
     # 4. Λογική Αναζήτησης (AND Logic) - Τώρα χρησιμοποιεί τα εμπλουτισμένα μεταδεδομένα
     results = []
-    # Use the value from the text input, or from the mic recorder if it updated the state
-    search_query_final = st.session_state.get("library_search_input_text", "").strip().lower()
-
-    if search_query_final:
-        search_terms = search_query_final.split()
+    if query:
+        search_terms = query.split()
         for item in library_data:
             # Δημιουργία ενός "Searchable String" από όλα τα πεδία
             # Χρησιμοποιούμε τα νέα πεδία: brand, model, meta_type, error_codes
@@ -106,25 +85,43 @@ def render_search_page(library_data: List[Dict[str, Any]]) -> None:
             # Έλεγχος: Όλοι οι όροι πρέπει να υπάρχουν
             if all(term in full_text for term in search_terms):
                 results.append(item)
-        logger.info(f"User searched for '{search_query_final}' - Found {len(results)} matches.")
+        
+        logger.info(f"User searched for '{query}' - Found {len(results)} matches.")
     else:
-        # Αν δεν γράψει τίποτα, δείχνουμε τα πρόσφατα (ή όλα)
-        results = sorted(library_data, key=lambda x: x.get('name', ''), reverse=False) # Sort by name by default
-    
-    if results:
-        for item in results:
+        # Αν δεν γράψει τίποτα, δείχνουμε τα πρόσφατα
+        # Using 'name' for consistent sorting if no other timestamp is available
+        results = sorted(library_data, key=lambda x: x.get('name', ''), reverse=True)[:10] 
+        st.caption("Πρόσφατα καταχωρημένα αρχεία:")
+
+    # 5. Εμφάνιση Αποτελεσμάτων
+    if not results and query:
+        st.error("Δεν βρέθηκαν αποτελέσματα.")
+    else:
+        for res in results:
             with st.container(border=True):
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.markdown(f"**{item.get('brand', 'N/A')}** - {item.get('model', 'N/A')}")
-                    st.markdown(f"*{item.get('original_name', 'N/A')}*")
-                    if item.get('error_codes'):
-                        st.markdown(f"**Error Codes:** `{item['error_codes']}`")
-                with col2:
-                    # Badge for meta_type
-                    meta_type = item.get('meta_type', 'DOC').replace('_', ' ').title()
-                    color = _get_badge_color(item.get('meta_type', 'DOC'))
-                    st.markdown(f"###### :{color}[{meta_type}]")
-                    st.link_button("🔗 Open PDF", item.get('link', '#'), use_container_width=True)
-    else:
-        st.info("Δεν βρέθηκαν αποτελέσματα για την αναζήτησή σας.")
+                c1, c2, c3 = st.columns([1, 3, 1])
+                
+                # Στήλη 1: Brand & Badge
+                with c1:
+                    st.markdown(f"**{res.get('brand', 'Unknown').title()}**") # Title case for better display
+                    color = _get_badge_color(res.get('meta_type', 'DOC'))
+                    st.markdown(f":{color}[{res.get('meta_type', 'DOC').replace('_', ' ')}]") # Replace underscore for readability
+
+                # Στήλη 2: Λεπτομέρειες
+                with c2:
+                    st.markdown(f"📄 **{res.get('model', 'General Model').title()}**")
+                    st.caption(f"Filename: {res.get('original_name', res.get('name'))}") # Display original filename
+                    if res.get('error_codes'):
+                        st.text(f"Error Code: {res.get('error_codes')}")
+                
+                # Στήλη 3: Κουμπί
+                with c3:
+                    link = res.get('link')
+                    # Fallback link generation
+                    if not link and res.get('file_id') and res.get('file_id') != 'Unknown':
+                        link = f"https://drive.google.com/file/d/{res['file_id']}/view"
+                    
+                    if link:
+                        st.link_button("📂 Άνοιγμα", link, use_container_width=True)
+                    else:
+                        st.caption("No Link Available")

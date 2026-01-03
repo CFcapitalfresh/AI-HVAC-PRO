@@ -7,10 +7,11 @@ import streamlit as st
 from services.sync_service import SyncService
 from core.drive_manager import DriveManager
 from core.ai_engine import AIEngine
-from typing import List, Dict, Any, Optional # NEW
+from typing import List, Dict, Any, Optional
 import logging
-import io # NEW: For handling downloaded file streams
-from pypdf import PdfReader # NEW: For reading PDF content
+import io
+from pypdf import PdfReader # Used for text extraction
+from PIL import Image # For image processing (if needed for AI)
 
 logger = logging.getLogger("Service.ChatSession")
 
@@ -23,23 +24,16 @@ class ChatSessionService:
             st.session_state.library_cache = self.sync.load_index()
         logger.info("ChatSessionService initialized.")
 
-
-    def get_brands(self):
-        """Επιστρέφει τις μάρκες."""
+    def get_brands(self) -> List[str]:
+        """Επιστρέφει τις μάρκες από τα metadata του ευρετηρίου."""
         data = st.session_state.get('library_cache', [])
         brands = set()
         for item in data:
-            name = item.get('name', '')
-            parts = name.split('|')
-            if len(parts) >= 2:
-                brand = parts[1].strip().upper()
-                if brand and len(brand) > 1: brands.add(brand)
-            elif '_' in name:
-                parts_old = name.split('_')
-                if parts_old: brands.add(parts_old[0].upper())
+            brand = item.get('brand', 'Unknown').upper() # Use extracted metadata field directly
+            if brand and brand != 'UNKNOWN': brands.add(brand)
         return sorted(list(brands))
 
-    def get_prioritized_manuals(self, brand, model_keyword, user_query):
+    def get_prioritized_manuals(self, brand: str, model_keyword: str, user_query: str) -> List[Dict[str, Any]]:
         """
         ΤΟ ΜΥΣΤΙΚΟ ΟΠΛΟ:
         1. Βρίσκει τα αρχεία της μάρκας.
@@ -51,13 +45,14 @@ class ChatSessionService:
         target_brand = brand.upper()
         target_model = model_keyword.upper() if model_keyword else None
         
-        # 1. Βασικό Φιλτράρισμα
+        # 1. Βασικό Φιλτράρισμα (Use metadata fields)
         for item in data:
-            name_upper = item['name'].upper()
-            if target_brand in name_upper:
-                if target_model and target_model not in name_upper:
-                    continue
-                results.append(item)
+            item_brand = item.get('brand', '').upper()
+            item_model = item.get('model', '').upper()
+            
+            if item_brand == target_brand:
+                if not target_model or target_model in item_model: # Allow model match or no model filter
+                    results.append(item)
 
         # 2. Ανίχνευση Πρόθεσης (Intent)
         query = user_query.upper()
@@ -73,129 +68,121 @@ class ChatSessionService:
             intent = "PARTS"
 
         # 3. Δυναμική Βαθμολόγηση (Scoring)
-        # Χρησιμοποιούμε lambda function για να περάσουμε το intent
         results.sort(key=lambda item: self._calculate_score(item, intent), reverse=True)
             
         return results
 
-    def _calculate_score(self, item, intent):
+    def _calculate_score(self, item: Dict[str, Any], intent: str) -> int:
         """Δίνει πόντους στο αρχείο ανάλογα με το αν ταιριάζει στην ερώτηση."""
-        name = item['name'].upper()
+        meta_type = item.get('meta_type', '').upper() # Use new metadata field
         score = 0
         
-        # --- SCORING RULES ---
-        
+        # --- SCORING RULES --- (Refined to use meta_type)
         if intent == "PARTS":
-            # Αν ψάχνει ανταλλακτικά, αυτά πάνε κορυφή (100)
-            if "SPARE" in name or "PARTS" in name or "EXPLODED" in name: score += 100
-            elif "SERVICE" in name: score += 50
+            if "SPARE" in meta_type: score += 100
+            elif "SERVICE" in meta_type: score += 50
             else: score += 10
             
         elif intent == "ERROR":
-            # Στις βλάβες θέλουμε Service & Install
-            if "SERVICE" in name: score += 100
-            elif "INSTALL" in name: score += 90
-            elif "USER" in name: score += 40
-            elif "SPARE" in name: score += 10 # Χαμηλή προτεραιότητα
+            if "SERVICE" in meta_type: score += 100
+            elif "INSTALLATION" in meta_type: score += 90
+            elif "USER" in meta_type: score += 40
+            elif "SPARE" in meta_type: score += 10
             
         elif intent == "INSTALL":
-            if "INSTALL" in name: score += 100
-            elif "TECHNICAL" in name: score += 80
-            elif "SERVICE" in name: score += 60
+            if "INSTALLATION" in meta_type: score += 100
+            elif "TECHNICAL" in meta_type: score += 80
+            elif "SERVICE" in meta_type: score += 60
             
         elif intent == "USER":
-            if "USER" in name or "OWNER" in name or "ΧΡΗΣΗ" in name: score += 100
-            elif "INSTALL" in name: score += 50
+            if "USER" in meta_type: score += 100
+            elif "INSTALLATION" in meta_type: score += 50
             
         else: # GENERAL (Default)
-            # Η κλασική σειρά: Service > Install > User > Parts
-            if "SERVICE" in name: score += 90
-            elif "INSTALL" in name: score += 80
-            elif "USER" in name: score += 70
-            elif "SPARE" in name: score += 20
+            if "SERVICE" in meta_type: score += 90
+            elif "INSTALLATION" in meta_type: score += 80
+            elif "USER" in meta_type: score += 70
+            elif "SPARE" in meta_type: score += 20
 
         return score
 
-    def handle_manual_upload(self, uploaded_file, brand, model):
-        root_id = ConfigLoader.get_drive_folder_id()
-        if not root_id: return False
-        safe_name = f"User_Uploads | {brand} | {model} | {uploaded_file.name}"
-        file_id = self.drive.upload_stream(uploaded_file, safe_name, root_id)
-        if file_id:
-            new_entry = {'file_id': file_id, 'name': safe_name, 'link': f"https://drive.google.com/file/d/{file_id}/view", 'mime': 'application/pdf'}
-            st.session_state.library_cache.append(new_entry)
-            return True
-        return False
-
-    def get_manual_content_from_id(self, file_id: str) -> Optional[str]: # NEW
-        """
-        Κατεβάζει ένα manual από το Drive και εξάγει το κείμενό του.
-        """
+    def get_manual_text_content(self, file_id: str) -> Optional[str]:
+        """Κατεβάζει ένα manual από το Drive και εξάγει το κείμενο."""
         try:
-            stream = self.drive.download_file_content(file_id)
-            if not stream:
-                logger.error(f"Failed to download content for file_id: {file_id}")
-                return None
-            
-            reader = PdfReader(io.BytesIO(stream.getvalue()))
-            text = ""
-            # Extract text from the first few pages to avoid large payloads
-            for i in range(min(5, len(reader.pages))):
-                page_text = reader.pages[i].extract_text()
-                if page_text:
-                    text += page_text + "\n"
-            
-            logger.info(f"Extracted {len(text)} characters from manual ID: {file_id}")
-            return text
+            file_stream = self.drive.download_file_content(file_id)
+            if file_stream:
+                reader = PdfReader(file_stream)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() or ""
+                return text
+            return None
         except Exception as e:
-            logger.error(f"Error extracting text from manual ID: {file_id}. Error: {e}", exc_info=True)
+            logger.error(f"Error extracting text from PDF (file ID: {file_id}): {e}", exc_info=True)
             return None
 
-
-    def smart_solve(self, user_query: str, uploaded_pdfs: List[Any], uploaded_imgs: List[Any], history: List[Dict], lang: str = "gr", manual_file_content: Optional[str] = None) -> str: # MODIFIED
+    def handle_manual_upload(self, uploaded_file, brand, model) -> Optional[str]:
         """
-        Λογική επίλυσης προβλημάτων που χρησιμοποιεί AI και επισυναπτόμενα αρχεία.
-        Προετοιμάζει τα content parts για το AI Engine.
+        Ανεβάζει ένα αρχείο στο Drive και επιστρέφει το ID του.
+        (UNUSED IN CURRENT UI, KEPT FOR POTENTIAL FUTURE USE OR AI-DIRECTED UPLOAD)
         """
-        if not self.ai_engine.model:
-            logger.error(f"AI System Error: AI Engine not initialized in ChatSessionService. Last error: {self.ai_engine.last_error or 'Unknown'}")
-            return f"❌ **AI System Error:** AI Engine not initialized. {self.ai_engine.last_error or ''}"
+        root_id = self.drive.root_id
+        if not root_id:
+            logger.error("Root Drive folder ID is not configured.")
+            return None
+        
+        # Create a structured name for the uploaded file
+        safe_name = f"User_Uploads | {brand or 'Unknown'} | {model or 'Generic'} | {uploaded_file.name}"
+        try:
+            file_id = self.drive.upload_stream(uploaded_file, safe_name, root_id)
+            return file_id
+        except Exception as e:
+            logger.error(f"Failed to upload user file '{uploaded_file.name}' to Drive: {e}", exc_info=True)
+            return None
 
+    def get_ai_response(self, user_prompt: Optional[str], uploaded_files: List[Any], 
+                        manual_contexts: List[str], chat_history: List[Dict[str, str]], lang: str) -> str:
+        """
+        Επικοινωνεί με το AI Engine για να λάβει απάντηση,
+        συμπεριλαμβάνοντας κείμενο, ανεβασμένα αρχεία και manual contexts.
+        """
         content_parts = []
 
-        # Προσθήκη των τελευταίων μηνυμάτων του ιστορικού για context
-        # Λαμβάνουμε υπόψη τα 5 τελευταία ζευγάρια (user/assistant)
-        for msg in history[-10:]: # Περίπου 5 συνομιλίες μπρος-πίσω
-            if msg["role"] == "user":
-                content_parts.append({"text": f"Προηγούμενος Χρήστης: {msg['content']}"})
-            elif msg["role"] == "assistant":
-                content_parts.append({"text": f"Προηγούμενος Mastro Nek: {msg['content']}"})
+        # Add chat history as text parts for context
+        for msg in chat_history:
+            content_parts.append({"text": f"{msg['role']}: {msg['content']}"})
 
-        # Προσθήκη PDF αρχείων (από το βασικό chat input)
-        for pdf_file in uploaded_pdfs:
-            pdf_bytes = pdf_file.getvalue()
-            content_parts.append({
-                "mime_type": "application/pdf",
-                "data": pdf_bytes
-            })
-            content_parts.append({"text": f"Αρχείο PDF: {pdf_file.name}"})
-            logger.info(f"Adding PDF to AI context: {pdf_file.name}")
+        # Add the current user prompt
+        if user_prompt:
+            content_parts.append({"text": f"user: {user_prompt}"})
 
-
-        # Προσθήκη εικόνων (από το βασικό chat input)
-        for img_file in uploaded_imgs:
-            img_bytes = img_file.getvalue()
-            content_parts.append({
-                "mime_type": img_file.type, # π.χ. "image/png"
-                "data": img_bytes
-            })
-            content_parts.append({"text": f"Εικόνα: {img_file.name}"})
-            logger.info(f"Adding Image to AI context: {img_file.name}")
-
-
-        # Προσθήκη της τρέχουσας ερώτησης του χρήστη
-        content_parts.append({"text": f"Τρέχουσα Ερώτηση Χρήστη: {user_query}"})
+        # Add uploaded files (images & PDFs)
+        for uploaded_file in uploaded_files:
+            file_type = uploaded_file.type
+            file_bytes = uploaded_file.getvalue()
+            
+            if "image" in file_type:
+                img = Image.open(io.BytesIO(file_bytes))
+                content_parts.append(img) # AI Engine expects PIL Image directly
+            elif "pdf" in file_type:
+                # For PDFs, extract text and send as text_part (or directly as bytes for Vision if supported)
+                # Current AIEngine expects file-like objects for direct PDF parsing
+                content_parts.append(io.BytesIO(file_bytes)) # Pass as bytes stream for direct AI parsing
+            else:
+                logger.warning(f"Unsupported file type uploaded: {file_type}")
         
-        # Κλήση του AI Engine (τώρα μπορεί να δέχεται και manual_file_content)
-        response = self.ai_engine.get_chat_response(content_parts=content_parts, lang=lang, manual_file_content=manual_file_content)
-        return response
+        # Add manual contexts
+        if manual_contexts:
+            context_text = "\n\n--- MANUAL CONTEXT ---\n" + "\n\n".join(manual_contexts)
+            content_parts.append({"text": context_text})
+            logger.info(f"AI Call: Added {len(manual_contexts)} manual contexts.")
+
+        try:
+            if not content_parts: # Should not happen if prompt or files are present
+                return "Παρακαλώ δώστε μια ερώτηση ή ανεβάστε αρχείο."
+            
+            response = self.ai_engine.get_chat_response(content_parts, lang=lang)
+            return response
+        except Exception as e:
+            logger.error(f"Error getting AI response in ChatSessionService: {e}", exc_info=True)
+            return f"❌ Σφάλμα επικοινωνίας με το AI: {e}"
