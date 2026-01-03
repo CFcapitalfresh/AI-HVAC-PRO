@@ -9,3 +9,4 @@ pypdf
 Pillow
 bcrypt
 openpyxl
+streamlit-mic-recorder
