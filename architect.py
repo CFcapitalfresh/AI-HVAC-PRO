@@ -12,14 +12,14 @@ try:
     import google.generativeai as genai
     from streamlit_mic_recorder import mic_recorder
 except ImportError:
-    st.error("⚠️ ΛΕΙΠΟΥΝ ΒΙΒΛΙΟΘΗΚΕΣ. Τρέξε στο τερματικό: pip install google-generativeai==0.7.2 streamlit-mic-recorder")
+    st.error("⚠️ ΛΕΙΠΟΥΝ ΒΙΒΛΙΟΘΗΚΕΣ. Τρέξε στο τερματικό: pip install --upgrade google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v28 (The Survivor)", page_icon="🚑", layout="wide")
+st.set_page_config(page_title="Architect AI v29 (Sniper Mode)", page_icon="🎯", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
-    "1. SURVIVAL MODE: Δεν ζητάει συγκεκριμένα μοντέλα. Παίρνει ό,τι βρει διαθέσιμο.",
+    "1. SNIPER MODE: Απαγόρευση χρήσης Gemini 2.5 (Low Quota). Κλείδωμα σε 1.5 Flash.",
     "2. FULL MEDIA: Voice & Vision.",
     "3. SELF-EVOLUTION: Πλήρης πρόσβαση στον κώδικα (architect.py).",
     "4. SAFETY: Syntax Check & Backups.",
@@ -64,55 +64,61 @@ def backup_file(file_path):
     except: pass
     return False
 
-# --- THE SURVIVAL ENGINE (NO HARDCODED NAMES) ---
+# --- THE SNIPER ENGINE (BLACKLIST 2.5) ---
 
-def get_any_working_model(api_key):
+def get_safe_model(api_key):
     """
-    ΔΕΝ ζητάει 'gemini-pro' ή 'flash'.
-    Ρωτάει τη λίστα και παίρνει το πρώτο που επιτρέπει 'generateContent'.
+    Ψάχνει τα μοντέλα, αλλά ΑΠΑΓΟΡΕΥΕΙ το '2.5' και το 'experimental'.
     """
     genai.configure(api_key=api_key)
     try:
-        # Ζητάμε από το API να μας πει τι έχει
+        # 1. Ζητάμε τη λίστα
         all_models = list(genai.list_models())
+        available_names = [m.name for m in all_models if 'generateContent' in m.supported_generation_methods]
         
-        # Φιλτράρουμε μόνο αυτά που παράγουν κείμενο
-        valid_models = [m.name for m in all_models if 'generateContent' in m.supported_generation_methods]
+        # 2. ΦΙΛΤΡΟ BLACKLIST: Πετάμε έξω οτιδήποτε λέει "2.5"
+        safe_list = [name for name in available_names if "2.5" not in name]
         
-        if not valid_models:
-            return None, "Δεν βρέθηκαν μοντέλα στο API Key σου."
+        # 3. ΕΠΙΛΟΓΗ SNIPER: Ψάχνουμε συγκεκριμένα το 1.5 Flash
+        for name in safe_list:
+            if "flash" in name and "1.5" in name:
+                return name, "✅ Locked on 1.5 Flash"
+        
+        # 4. Αν δεν βρούμε Flash, ψάχνουμε Pro 1.5
+        for name in safe_list:
+            if "pro" in name and "1.5" in name:
+                return name, "⚠️ Fallback to 1.5 Pro"
+
+        # 5. Αν δεν βρούμε τίποτα από τα παραπάνω, επιστρέφουμε το πρώτο ασφαλές
+        if safe_list:
+            return safe_list[0], f"⚠️ Fallback to {safe_list[0]}"
             
-        # Προσπάθεια να βρούμε τα καλύτερα, αλλιώς παίρνουμε το πρώτο τυχαίο
-        # 1. Flash
-        for m in valid_models:
-            if "flash" in m and "1.5" in m: return m, "Found Flash 1.5"
-        # 2. Pro
-        for m in valid_models:
-            if "pro" in m and "1.5" in m: return m, "Found Pro 1.5"
-        # 3. Οτιδήποτε άλλο
-        return valid_models[0], f"Fallback to {valid_models[0]}"
+        return None, "❌ No safe models found."
         
     except Exception as e:
-        return None, str(e)
+        # Αν αποτύχει η λίστα, πάμε καρφωτά στο Flash (αφού κάνατε update, θα δουλέψει)
+        return "models/gemini-1.5-flash", "⚠️ Blind Force Flash"
 
-def generate_with_survivor_logic(strategy_name, parts, api_key):
+def generate_with_sniper_logic(strategy_name, parts, api_key):
     """
-    Εκτελεί με το μοντέλο που βρέθηκε δυναμικά.
+    Εκτελεί με το ασφαλές μοντέλο.
     """
     if not api_key: return "ERROR: Missing API Key."
     
-    # Βρες ένα μοντέλο που να υπάρχει ΠΡΑΓΜΑΤΙΚΑ
-    model_name, status_msg = get_any_working_model(api_key)
+    # Βρες το σωστό μοντέλο
+    model_name, status_msg = get_safe_model(api_key)
+    
+    # Debug info στο terminal
+    print(f"🎯 Sniper Target: {model_name} | {status_msg}")
     
     if not model_name:
-        return f"CRITICAL ERROR: {status_msg}. \nΠΙΘΑΝΗ ΑΙΤΙΑ: Η βιβλιοθήκη είναι παλιά. Τρέξε: pip install --upgrade google-generativeai"
+        return f"CRITICAL ERROR: {status_msg}"
 
-    # print(f"🚑 Survivor Mode using: {model_name}") # Debug
-    
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(model_name)
         
+        # Αυστηρό config
         config = genai.types.GenerationConfig(temperature=0.2, top_p=0.95, top_k=64, max_output_tokens=8192)
         safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
                   ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
@@ -121,14 +127,17 @@ def generate_with_survivor_logic(strategy_name, parts, api_key):
         return response.text
         
     except Exception as e:
-        return f"CRITICAL AI ERROR ({model_name}): {str(e)}"
+        err = str(e)
+        if "429" in err:
+            return f"QUOTA ERROR ({model_name}): Ξεπεράσατε τα όρια. Περιμένετε λίγο. (Προσπαθήσαμε να αποφύγουμε το 2.5, αλλά ίσως το 1.5 είναι φορτωμένο)."
+        return f"CRITICAL AI ERROR ({model_name}): {err}"
 
 # --- SELF HEALING ---
 
 def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
     """Καλεί το AI για διόρθωση."""
     prompt = f"FIX SYNTAX ERROR in '{file_path}':\n{error_msg}\nCODE:\n```python\n{bad_code}\n```\nReturn ONLY code."
-    return generate_with_survivor_logic("Fix", [prompt], api_key)
+    return generate_with_sniper_logic("Fix", [prompt], api_key)
 
 def apply_changes_from_response(response_text, api_key):
     """Εφαρμογή αλλαγών με Syntax Check & Self-Healing."""
@@ -171,7 +180,7 @@ def apply_changes_from_response(response_text, api_key):
                             _, final_code = new_matches[0]
                         else: break 
                     else: break 
-            else: # Αν δεν είναι python, υποθέτουμε ότι είναι σωστό
+            else: 
                 success = True
                 break
 
@@ -194,7 +203,7 @@ def apply_changes_from_response(response_text, api_key):
 # --- 4. MAIN APPLICATION ---
 
 def main():
-    st.title("🚑 Architect AI v28 (The Survivor)")
+    st.title("🎯 Architect AI v29 (Sniper Mode)")
     
     project_files = get_project_structure()
     file_list = ["None (Global Context)", "architect.py"] + [f for f in project_files.keys() if f != "architect.py"]
@@ -206,17 +215,17 @@ def main():
             api_key = st.secrets["GEMINI_API_KEY"]
             st.success("Key loaded from secrets")
         
-        # --- DIAGNOSTICS (ΝΕΟ) ---
+        # --- DIAGNOSTICS ---
         if api_key:
-            with st.expander("🔍 Diagnostics"):
-                m, status = get_any_working_model(api_key)
-                st.write(f"**Connected Model:** `{m}`")
-                st.write(f"**Status:** {status}")
+            with st.expander("🔍 Model Diagnostics"):
+                m, status = get_safe_model(api_key)
+                st.write(f"**Target Model:** `{m}`")
+                st.write(f"**Log:** {status}")
 
         st.markdown("---")
         st.subheader("🎙️ & 📸 Inputs")
         
-        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='recorder_v28')
+        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='recorder_v29')
         uploaded_file = st.file_uploader("Upload Image/PDF", type=['png', 'jpg', 'jpeg', 'pdf'], label_visibility="collapsed")
         
         st.markdown("---")
@@ -292,8 +301,8 @@ def main():
         if uploaded_file: parts.append({"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()})
 
         with st.chat_message("assistant"):
-            with st.spinner(f"O Αρχιτέκτονας ψάχνει σύνδεση (Survivor Mode)..."):
-                response_text = generate_with_survivor_logic(selected_strategy, parts, api_key)
+            with st.spinner(f"O Αρχιτέκτονας συνδέεται (Sniper Mode)..."):
+                response_text = generate_with_sniper_logic(selected_strategy, parts, api_key)
                 st.markdown(response_text)
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 
