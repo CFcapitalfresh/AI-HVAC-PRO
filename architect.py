@@ -3,6 +3,7 @@ import os
 import shutil
 import re
 import time
+import ast
 from datetime import datetime
 try:
     from groq import Groq
@@ -12,27 +13,28 @@ except ImportError:
     st.stop()
 
 # --- 1. ΡΥΘΜΙΣΕΙΣ INTERFACE ---
-st.set_page_config(page_title="Architect AI v40", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Architect AI v41 (Mentor Mode)", page_icon="🏗️", layout="wide")
 
-# --- 2. ΣΥΝΑΡΤΗΣΕΙΣ ΔΙΑΧΕΙΡΙΣΗΣ ΑΡΧΕΙΩΝ ---
+# --- 2. ΒΟΗΘΗΤΙΚΕΣ ΣΥΝΑΡΤΗΣΕΙΣ ---
 def get_project_context():
-    """Διαβάζει τα αρχεία του project με ασφάλεια για τα tokens."""
+    """Διαβάζει τα αρχεία του project (συμπεριλαμβανομένου του architect.py)."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
     file_contents = {}
-    ignore = {'.git', '__pycache__', 'venv', '.streamlit', 'backups', 'data'} 
-    
+    # Αφαιρέσαμε το .streamlit από το ignore αν θες να βλέπει ρυθμίσεις, 
+    # αλλά κρατάμε τα backups και τα venv εκτός.
+    ignore = {'.git', '__pycache__', 'venv', 'backups', '.DS_Store'} 
     for dirpath, dirnames, filenames in os.walk(root_dir):
         dirnames[:] = [d for d in dirnames if d not in ignore]
         for f in filenames:
-            # Διαβάζουμε μόνο αρχεία κώδικα και ρυθμίσεων
-            if f.endswith(('.py', '.json', '.css', '.txt')):
+            # Διαβάζουμε py, json, css, txt, md
+            if f.endswith(('.py', '.json', '.css', '.txt', '.md')):
                 try:
                     rel_path = os.path.relpath(os.path.join(dirpath, f), root_dir)
                     with open(os.path.join(dirpath, f), 'r', encoding='utf-8', errors='ignore') as file:
+                        # Περιορισμός για να μην σκάει το όριο tokens (Rate Limit)
                         content = file.read()
-                        # Αν το αρχείο είναι πολύ μεγάλο, παίρνουμε ένα σημαντικό μέρος του
-                        if len(content) > 8000:
-                            content = content[:4000] + "\n... [Περικοπή για λόγους χωρητικότητας] ...\n" + content[-4000:]
+                        if len(content) > 7000:
+                            content = content[:3500] + "\n... [truncated] ...\n" + content[-3500:]
                         file_contents[rel_path] = content
                 except: pass
     return file_contents
@@ -43,106 +45,99 @@ def apply_code_changes(response_text):
     matches = re.findall(pattern, response_text, re.DOTALL)
     log = []
     if not matches: return "ℹ️ Δεν βρέθηκε κώδικας για αποθήκευση."
-    
     for filename, code in matches:
         filename = filename.strip().replace("\\", "/")
         full_path = os.path.abspath(filename)
-        
-        # Backup
         if os.path.exists(full_path):
             b_dir = os.path.join(os.path.dirname(full_path), "backups")
             os.makedirs(b_dir, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            shutil.copy2(full_path, os.path.join(b_dir, f"{os.path.basename(full_path)}_{ts}.bak"))
-            
+            shutil.copy2(full_path, os.path.join(b_dir, f"{os.path.basename(full_path)}_{datetime.now().strftime('%H%M%S')}.bak"))
         try:
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(code.strip())
-            log.append(f"✅ ΕΝΗΜΕΡΩΘΗΚΕ: {filename}")
-        except Exception as e:
-            log.append(f"❌ ΣΦΑΛΜΑ: {filename} ({e})")
+            with open(full_path, 'w', encoding='utf-8') as f: f.write(code.strip())
+            log.append(f"✅ UPDATED: {filename}")
+        except Exception as e: log.append(f"❌ ERROR: {filename} ({e})")
     return "\n".join(log)
 
-# --- 3. Η ΜΗΧΑΝΗ ΤΟΥ AI (META LLAMA 3.3) ---
-def run_ai_logic(prompt_text, api_key):
-    if not api_key: return "❌ Παρακαλώ βάλε το Groq API Key στο sidebar."
+# --- 3. Η ΜΗΧΑΝΗ ΤΗΣ META (GROQ) ---
+def run_llama_logic(prompt_text, api_key):
+    if not api_key: return "❌ Λείπει το Groq API Key."
     client = Groq(api_key=api_key)
-    
-    # Φόρτωση του context
-    project_data = get_project_context()
-    context_str = "PROJECT FILES:\n"
-    for name, content in project_data.items():
-        context_str += f"\n--- FILE: {name} ---\n{content}\n"
-
-    system_prompt = """
-    ΕΙΣΑΙ: Ο Mastro Nek, Senior AI Architect. 
-    ΓΛΩΣΣΑ: Ελληνικά.
-    ΚΑΘΗΚΟΝ: Βοήθησε τον χρήστη να αναπτύξει το HVAC SaaS project του.
-    
-    ΚΑΝΟΝΕΣ:
-    1. Εξήγησε σύντομα στα Ελληνικά τι θα κάνεις.
-    2. Δώσε ΠΛΗΡΗ κώδικα για τα αρχεία που αλλάζεις.
-    3. Format: ### FILE: filename.py ακολουθούμενο από block κώδικα.
-    """
-
     try:
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"CONTEXT:\n{context_str}\n\nUSER REQUEST: {prompt_text}"}
+                {
+                    "role": "system", 
+                    "content": "Είσαι ο Mastro Nek, Senior AI Architect. Μίλα πάντα Ελληνικά. Εξήγησε αναλυτικά το πλάνο σου πριν δώσεις κώδικα. Μην δίνεις μόνο σύμβολα."
+                },
+                {"role": "user", "content": prompt_text}
             ],
-            temperature=0.2,
-            max_tokens=8192
+            temperature=0.3, # Λίγο παραπάνω δημιουργικότητα για την επεξηγήση
+            max_tokens=8192,
         )
         return completion.choices[0].message.content
     except Exception as e:
-        if "rate_limit_exceeded" in str(e):
-            return "⏳ ΣΦΑΛΜΑ: Το project είναι πολύ μεγάλο για το δωρεάν όριο της Groq. Δοκίμασε να σβήσεις κάποια παλιά logs ή μεγάλα αρχεία κειμένου."
-        return f"❌ AI ERROR: {str(e)}"
+        return f"❌ Groq Error: {str(e)}"
 
 # --- 4. UI ---
 def main():
-    st.title("🏗️ Mastro Nek v40")
-    st.caption("Stable & Self-Aware Edition (Llama 3.3)")
-
+    st.title("🏗️ Architect AI v41 (Mentor Mode)")
+    
     with st.sidebar:
-        st.header("Ρυθμίσεις")
+        st.header("Settings")
         api_key = st.text_input("Groq API Key", type="password")
         st.divider()
-        audio = mic_recorder(start_prompt="🎤 Rec", stop_prompt="⏹ Stop", key='mic_v40')
+        audio = mic_recorder(start_prompt="🎤 Rec (Voice)", stop_prompt="⏹ Stop", key='mic_v41')
         st.divider()
-        if st.button("🗑️ Clear Chat"):
-            st.session_state.chat_history = []
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.messages = []
             st.rerun()
+        
+        strategy = st.selectbox("Strategy", ["Bug Fix", "New Feature", "Refactor", "Self-Upgrade"])
+        auto_save = st.checkbox("Auto-Save", value=False)
 
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+    if "messages" not in st.session_state: st.session_state.messages = []
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    # Προβολή ιστορικού
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # Είσοδος χρήστη
-    user_input = st.chat_input("Πώς προχωράμε σήμερα;")
+    user_prompt = st.chat_input("Πώς μπορώ να βοηθήσω στο Project σήμερα;")
     
-    if (user_input or audio) and api_key:
-        prompt = user_input if user_input else "Επεξεργασία φωνητικής εντολής..."
-        st.session_state.chat_history.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
+    if (user_prompt or audio) and api_key:
+        input_msg = user_prompt if user_prompt else "Φωνητική εντολή..."
+        st.session_state.messages.append({"role": "user", "content": input_msg})
+        with st.chat_message("user"): st.markdown(input_msg)
+
+        # Build Context
+        project_data = get_project_context()
+        context_str = "PROJECT FILES:\n" + "\n".join([f"--- {n} ---\n{c}" for n, c in project_data.items()])
+        
+        full_prompt = f"""
+        ΡΟΛΟΣ: Senior Architect (Mastro Nek). 
+        CONTEXT: HVAC SaaS Project.
+        ΓΛΩΣΣΑ: ΕΛΛΗΝΙΚΑ.
+        
+        ΟΔΗΓΙΕΣ:
+        1. Ξεκίνα με μια σύντομη ανάλυση στα Ελληνικά. Εξήγησε τι θα αλλάξεις.
+        2. Μετά την εξήγηση, δώσε τον ΠΛΗΡΗ κώδικα.
+        3. Χρησιμοποίησε το format: ### FILE: filename.py \n ```python ... ```
+        
+        PROJECT DATA:
+        {context_str}
+        
+        REQUEST: {input_msg}
+        """
 
         with st.chat_message("assistant"):
-            with st.spinner("Ο Αρχιτέκτονας εργάζεται..."):
-                response = run_ai_logic(prompt, api_key)
+            with st.spinner("Ο Αρχιτέκτονας αναλύει..."):
+                response = run_llama_logic(full_prompt, api_key)
                 st.markdown(response)
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
+                st.session_state.messages.append({"role": "assistant", "content": response})
                 
                 if "### FILE:" in response:
-                    if st.button("💾 Apply Changes"):
-                        log = apply_code_changes(response)
-                        st.info(log)
+                    if auto_save or st.button("💾 Apply Changes"):
+                        res_log = apply_code_changes(response)
+                        st.code(res_log)
                         time.sleep(1)
                         st.rerun()
 
