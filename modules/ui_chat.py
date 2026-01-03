@@ -22,17 +22,19 @@ from services.chat_session import ChatSessionService
 from core.drive_manager import DriveManager # For potential file operations if needed
 
 # Import Speech-to-Text library with graceful error handling (Rule 1)
+# Εισαγωγή βιβλιοθήκης για φωνητική εντολή (Προσοχή: πρέπει να εγκατασταθεί)
 try:
     from streamlit_mic_recorder import mic_recorder
 except ImportError:
     mic_recorder = None
 
-# Ρύθμιση Logger για το Module
+# Ρύθμιση Logger για το Module (Rule 4)
 logger = logging.getLogger("Module_Chat_UI")
 
 def render(user):
     lang = st.session_state.get('lang', 'gr')
     # Use existing instance if available, otherwise create a new one.
+    # Rule 3: Modularity - Use service layer for business logic.
     session_srv = ChatSessionService()
 
     st.header(get_text('menu_chat', lang))
@@ -66,15 +68,16 @@ def render(user):
                 initial_manuals = session_srv.get_prioritized_manuals(selected_brand, selected_model, user_query="")
                 if initial_manuals:
                     msg = get_text('manuals_found', lang) or f"Found {len(initial_manuals)}"
+                    # Rule 5: Correct use of format for translations with placeholders
                     if "{count}" in msg:
                         col3.success(f"✅ {msg.format(count=len(initial_manuals))}")
                     else:
-                        col3.success(f"✅ {msg}")
+                        col3.success(f"✅ {msg}") # Fallback if key used incorrectly in language pack
                 else:
                     msg = get_text('no_manuals', lang) or "No manuals found."
                     col3.warning(msg)
             except Exception as e:
-                logger.error(f"Error retrieving manuals: {e}", exc_info=True)
+                logger.error(f"Error retrieving manuals: {e}", exc_info=True) # Rule 4: Logging error
                 col3.error(get_text('general_ui_error', lang).format(error=str(e)))
         else:
             msg = get_text('select_brand_for_search', lang) or "Select Brand to enable search."

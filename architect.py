@@ -1,19 +1,21 @@
 import streamlit as st
 import os
-import shutil
-import traceback
-import time
 import re
+import shutil
+import time
+import traceback
+import ast
+from datetime import datetime
 
-# --- 1. SETUP ---
+# --- 1. SETUP & IMPORTS ---
 try:
     import google.generativeai as genai
     from streamlit_mic_recorder import mic_recorder
 except ImportError:
-    st.error("Missing libraries. Run: pip install google-generativeai streamlit-mic-recorder")
+    st.error("Missing libraries. Please run: pip install google-generativeai streamlit-mic-recorder")
     st.stop()
 
-st.set_page_config(page_title="Architect AI v13", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Architect AI v16 (Self-Healing)", page_icon="❤️‍🩹", layout="wide")
 
 # --- 2. PROTECTED RULES ---
 PROTECTED_FEATURES = [
@@ -27,240 +29,284 @@ PROTECTED_FEATURES = [
 ]
 
 # --- 3. HELPER FUNCTIONS ---
+
 def get_project_structure():
+    """Διαβάζει τη δομή του φακέλου."""
     root_dir = os.path.dirname(os.path.abspath(__file__))
-    structure = ""
     file_contents = {}
-    ignore_dirs = {"__pycache__", ".git", ".streamlit", "venv", ".vscode", "env", "build", "dist"}
-    ignore_files = {"architect.py", "requirements.txt", "README.md", ".gitignore", "LICENSE", ".DS_Store"}
-    
-    for path, subdirs, files in os.walk(root_dir):
-        subdirs[:] = [d for d in subdirs if d not in ignore_dirs]
-        for name in files:
-            if name.endswith(".py") and name not in ignore_files:
-                full_path = os.path.join(path, name)
-                rel_path = os.path.relpath(full_path, root_dir).replace("\\", "/")
-                structure += f"- {rel_path}\n"
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        file_contents[rel_path] = f.read()
-                except: pass
-    return structure, file_contents, root_dir
+    ignore_dirs = {'.git', '__pycache__', 'venv', '.streamlit', 'backups'} 
+    ignore_files = {'.DS_Store', 'token.json', 'credentials.json', 'architect.py', 'secrets.toml'} 
 
-def save_code_to_file(rel_path, new_code):
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+        for f in filenames:
+            if f in ignore_files or f.endswith(('.pyc', '.png', '.jpg', '.pdf', '.mp3')): 
+                continue
+            
+            full_path = os.path.join(dirpath, f)
+            rel_path = os.path.relpath(full_path, root_dir)
+            
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='ignore') as file:
+                    file_contents[rel_path] = file.read()
+            except Exception as e:
+                print(f"Error reading {rel_path}: {e}")
+
+    return file_contents
+
+def backup_file(file_path):
+    """Κρατάει backup πριν από κάθε αλλαγή."""
     try:
-        root_dir = os.path.dirname(os.path.abspath(__file__))
-        full_path = os.path.join(root_dir, rel_path.replace("/", os.sep))
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        if os.path.exists(full_path): shutil.copy(full_path, f"{full_path}.bak")
-        with open(full_path, "w", encoding="utf-8") as f: f.write(new_code)
-        return True, f"✅ Saved: {rel_path}"
-    except Exception as e: return False, str(e)
+        if os.path.exists(file_path):
+            backup_dir = os.path.join(os.path.dirname(file_path), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.basename(file_path)
+            shutil.copy2(file_path, os.path.join(backup_dir, f"{filename}_{timestamp}.bak"))
+            return True
+    except Exception as e:
+        print(f"Backup failed: {e}")
+    return False
 
-# --- 4. SMART AUTO-PILOT LOGIC (v13 NEW) ---
-@st.cache_data(ttl=600)
-def get_available_models(api_key):
-    """Φέρνει τα μοντέλα αλλά προσθέτει και την επιλογή Auto-Pilot."""
-    if not api_key: return []
+def fix_code_with_ai(file_path, bad_code, error_msg, api_key):
+    """
+    SELF-HEALING MODULE:
+    Καλεί το Gemini να διορθώσει το λάθος σύνταξης που έκανε.
+    """
     genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
     
-    base_options = ["✨ Auto-Pilot (Smart Switch)"] # Default επιλογή
+    prompt = f"""
+    CRITICAL FIX REQUEST:
+    I tried to run the Python code you generated for file '{file_path}', but it failed with a SYNTAX ERROR.
     
+    ERROR MESSAGE:
+    {error_msg}
+    
+    THE BAD CODE:
+    ```python
+    {bad_code}
+    ```
+    
+    MISSION:
+    Fix the syntax error. Return ONLY the corrected code block.
+    Format:
+    ### FILE: {file_path}
+    ```python
+    # Corrected code here
+    ```
+    """
     try:
-        models = list(genai.list_models())
-        fetched = [m.name for m in models if 'generateContent' in m.supported_generation_methods and "gemini" in m.name.lower()]
-        fetched.sort(key=lambda x: (0 if "flash" in x else 1 if "pro" in x else 2))
-        return base_options + fetched
-    except: 
-        return base_options + ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
+        response = model.generate_content(prompt)
+        return response.text
+    except:
+        return None
 
-def generate_with_auto_pilot(selected_option, prompt_parts):
+def apply_changes_from_response(response_text, api_key):
     """
-    Η καρδιά του v13:
-    Αν ο χρήστης διάλεξε 'Auto-Pilot', δοκιμάζει Flash -> Αν αποτύχει -> Pro -> Αν αποτύχει -> Wait.
-    Αν ο χρήστης διάλεξε συγκεκριμένο μοντέλο, σέβεται την επιλογή του.
+    VERSION 16 - SELF HEALING:
+    1. Βρίσκει τον κώδικα.
+    2. Syntax Check.
+    3. ΑΝ ΑΠΟΤΥΧΕΙ -> Καλεί fix_code_with_ai (μέχρι 2 φορές).
+    4. Σώζει μόνο αν περάσει το τεστ.
     """
-    # 1. Καθορισμός στρατηγικής
-    if "Auto-Pilot" in selected_option:
-        # Σειρά προτεραιότητας: Flash (Γρήγορο) -> Pro (Δυνατό) -> Flash Legacy
-        strategy = ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-1.0-pro"]
-    else:
-        # Χειροκίνητη επιλογή
-        strategy = [selected_option]
-
-    last_error = None
+    pattern = r"### FILE: (.+?)\n.*?```(?:python)?\n(.*?)```"
+    matches = re.findall(pattern, response_text, re.DOTALL)
     
-    # 2. Εκτέλεση με Failover
-    for model_name in strategy:
-        model = genai.GenerativeModel(model_name)
-        try:
-            # Δοκιμή χωρίς αναμονή πρώτα
-            return model.generate_content(prompt_parts).text
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "Quota" in error_str:
-                st.warning(f"⚠️ Το {model_name} είναι γεμάτο (429). Δοκιμάζω το επόμενο...")
-                last_error = e
-                continue # Πάμε στο επόμενο μοντέλο της λίστας
-            else:
-                raise e # Αν είναι άλλο λάθος (π.χ. λάθος prompt), σταματάμε
-
-    # 3. Αν αποτύχουν όλα, τότε περιμένουμε (Backoff) στο Flash
-    st.warning("⚠️ Όλα τα μοντέλα είναι φορτωμένα. Ενεργοποίηση Αναμονής (Auto-Retry)...")
-    fallback_model = genai.GenerativeModel("models/gemini-1.5-flash")
+    results = []
     
-    for i in range(3):
-        try:
-            time.sleep(5 * (i + 1))
-            return fallback_model.generate_content(prompt_parts).text
-        except Exception as e:
-            last_error = e
-            
-    raise Exception(f"Ο Auto-Pilot απέτυχε μετά από πολλαπλές προσπάθειες. Τελευταίο λάθος: {last_error}")
+    if not matches:
+        return "ℹ️ Δεν βρέθηκαν αλλαγές κώδικα για εφαρμογή."
 
-# --- 5. MAIN LOGIC ---
-def main():
-    st.title("🏗️ The Architect v13 (Auto-Pilot)")
-    
-    # --- Sidebar ---
-    with st.sidebar:
-        api_key = None
-        try:
-            api_key = st.secrets.get("GEMINI_KEY") or st.secrets.get("general", {}).get("GEMINI_KEY")
-        except: pass
+    for file_path, code_content in matches:
+        file_path = file_path.strip()
+        file_path = file_path.replace("\\", "/") 
+        if file_path.startswith("./"): file_path = file_path[2:]
         
-        if not api_key:
-            api_key = st.text_input("🔑 API Key", type="password")
-            if not api_key: st.stop()
-        else:
-            st.success("API Key Found")
-            
-        # Model Selector (v13 Update)
-        models = get_available_models(api_key)
-        sel_model = st.selectbox("Model Strategy:", models, index=0) # Default: Auto-Pilot
+        full_path = os.path.abspath(file_path)
+        root_path = os.path.dirname(os.path.abspath(__file__))
 
-        if st.button("🗑️ Reset"): 
-            st.session_state.messages = []
-            st.session_state.pending_changes = []
-            st.session_state.last_audio = None
-            st.rerun()
+        if not full_path.startswith(root_path):
+            results.append(f"⛔ SECURITY ALERT: Εκτός φακέλου ({file_path})")
+            continue
 
-    # Session
-    if "messages" not in st.session_state: st.session_state.messages = [{"role":"assistant", "content": "Auto-Pilot Active. Πες μου τι να κάνω."}]
-    if "pending_changes" not in st.session_state: st.session_state.pending_changes = []
-    if "last_audio" not in st.session_state: st.session_state.last_audio = None
+        # --- LOOP ΑΥΤΟ-ΘΕΡΑΠΕΙΑΣ (MAX 2 RETRIES) ---
+        attempts = 0
+        max_retries = 2
+        success = False
+        final_code = code_content
+        error_details = ""
 
-    # Load Files
-    structure, file_contents, root = get_project_structure()
-    
-    # --- TABS ---
-    tab_chat, tab_auto = st.tabs(["💬 Chat", "🛡️ Market Audit"])
+        while attempts <= max_retries:
+            if file_path.endswith(".py"):
+                try:
+                    ast.parse(final_code)
+                    success = True
+                    break # Όλα καλά, βγαίνουμε από το loop
+                except SyntaxError as e:
+                    error_details = f"{e.msg} (Line {e.lineno})"
+                    attempts += 1
+                    
+                    if attempts <= max_retries:
+                        print(f"⚠️ Syntax Error in {file_path}. Attempting Self-Heal {attempts}/{max_retries}...")
+                        # Κλήση στο Γιατρό (AI)
+                        healed_response = fix_code_with_ai(file_path, final_code, error_details, api_key)
+                        
+                        if healed_response:
+                            # Εξαγωγή του νέου κώδικα από την απάντηση θεραπείας
+                            new_matches = re.findall(pattern, healed_response, re.DOTALL)
+                            if new_matches:
+                                _, final_code = new_matches[0] # Παίρνουμε τον νέο κώδικα
+                            else:
+                                break # Το AI δεν επέστρεψε σωστό format
+                        else:
+                            break # Απέτυχε η σύνδεση
+                    else:
+                        break # Τέλος προσπαθειών
 
-    # --- TAB 1: Chat ---
-    with tab_chat:
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.caption(f"Scanning: `{os.path.basename(root)}/`")
-            scope_mode = st.radio("🔭 Scope:", ["📂 Ένα Αρχείο", "🌍 Όλο το Project"])
-            
-            focus_context = ""
-            focus_file_name = "GLOBAL"
-            
-            if scope_mode == "📂 Ένα Αρχείο":
-                all_files = sorted(list(file_contents.keys()))
-                def_ix = 0
-                for i, f in enumerate(all_files): 
-                    if "ui_chat.py" in f: def_ix = i
+        # --- ΤΕΛΙΚΗ ΕΤΥΜΗΓΟΡΙΑ ---
+        if success:
+            try:
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                backup_file(full_path)
+                with open(full_path, 'w', encoding='utf-8') as f:
+                    f.write(final_code.strip())
                 
-                focus_file_name = st.selectbox("Select:", all_files, index=def_ix)
-                with st.expander("Code"):
-                    st.code(file_contents.get(focus_file_name, ""), language="python")
-                focus_context = f"FILE ({focus_file_name}):\n```python\n{file_contents.get(focus_file_name, '')}\n```"
-            else:
-                focus_context = "GLOBAL CONTEXT (All Files)"
-
-        with c2:
-            for m in st.session_state.messages:
-                with st.chat_message(m["role"]): st.markdown(m["content"])
+                if attempts == 0:
+                    results.append(f"✅ UPDATED: {file_path}")
+                else:
+                    results.append(f"❤️‍🩹 HEALED & UPDATED: {file_path} (Μετά από {attempts} διορθώσεις)")
+            except Exception as e:
+                results.append(f"❌ ERROR writing {file_path}: {str(e)}")
+        else:
+             results.append(f"💀 DEAD CODE: {file_path} - Το AI απέτυχε να διορθώσει το Syntax Error: {error_details}")
             
-            t1, t2 = st.tabs(["Mic", "Text"])
-            user_in = None
-            is_audio = False
-            
-            with t1:
-                aud = mic_recorder(start_prompt="🔴", stop_prompt="⏹️", key='mic')
-                if aud and aud['id'] != st.session_state.last_audio:
-                    user_in = aud['bytes']
-                    is_audio = True
-                    st.session_state.last_audio = aud['id']
-            with t2:
-                txt = st.chat_input("Type...")
-                if txt: user_in = txt
-            
-            if user_in:
-                process_request(sel_model, user_in, is_audio, file_contents, structure, focus_file_name, False)
+    return "\n".join(results)
 
-    # --- TAB 2: Audit ---
-    with tab_auto:
-        st.header("🛡️ Commercial Audit")
-        if st.button("🚀 FULL AUDIT", type="primary"):
-            auto_prompt = "ACT AS CTO. Analyze for Commercial/SaaS Value. Identify Bugs. Fix the most critical one."
-            process_request(sel_model, auto_prompt, False, file_contents, structure, "GLOBAL", True)
+def generate_with_auto_pilot(strategy_name, parts, api_key):
+    """
+    GEMINI 1.5 FLASH (ΜΟΝΟΔΡΟΜΟΣ)
+    """
+    if not api_key: return "ERROR: Missing API Key."
+    genai.configure(api_key=api_key)
 
-    # --- SAVE ---
-    if st.session_state.pending_changes:
-        st.divider()
-        st.success(f"Generated {len(st.session_state.pending_changes)} files.")
-        for ch in st.session_state.pending_changes:
-            with st.expander(f"📄 {ch['file']}"):
-                st.code(ch['code'], language="python")
+    preferred_models = ["gemini-1.5-flash", "models/gemini-1.5-flash", "gemini-1.5-pro"]
+    selected_model_name = "models/gemini-1.5-flash"
 
-        if st.button("💾 SAVE ALL", type="primary"):
-            for ch in st.session_state.pending_changes:
-                save_code_to_file(ch["file"], ch["code"])
-            st.success("Saved!")
-            st.session_state.pending_changes = []
-            time.sleep(1)
-            st.rerun()
+    try:
+        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        for p in preferred_models:
+            match = next((m for m in available if p in m), None)
+            if match:
+                selected_model_name = match
+                break
+    except: pass
 
-def process_request(strategy_name, user_in, is_audio, files, structure, focus_file, is_auto):
-    if is_audio: st.session_state.messages.append({"role":"user", "content":"🎤 Audio"})
-    elif not is_auto: st.session_state.messages.append({"role":"user", "content":user_in})
+    try:
+        model = genai.GenerativeModel(selected_model_name)
+        safety = [{"category": c, "threshold": "BLOCK_NONE"} for c in 
+                  ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]]
+        response = model.generate_content(parts, safety_settings=safety)
+        return response.text
+    except Exception as e:
+        return f"CRITICAL AI ERROR: {str(e)}"
+
+# --- 4. MAIN APPLICATION ---
+
+def main():
+    st.title("❤️‍🩹 Architect AI v16 (Self-Healing)")
     
-    with st.spinner(f"Auto-Pilot ({strategy_name})..."):
-        try:
-            full_context = "PROJECT:\n" + "\n".join([f"--- {k} ---\n{v}" for k,v in files.items()])
-            
-            prompt = f"""
-            ROLE: Senior Python Architect. LANG: GREEK.
-            MISSION: Build a Commercial SaaS HVAC App.
-            RULES: {PROTECTED_FEATURES}
-            CONTEXT: {full_context}
-            FOCUS: {focus_file}
-            REQUEST: {user_in if not is_audio else "Transcribe & Execute"}
-            OUTPUT: 
-            ### FILE: filename.py
-            ```python
-            code
-            ```
-            """
-            
-            parts = [prompt]
-            if is_audio: parts.append({"mime_type": "audio/wav", "data": user_in})
-            
-            # CALL v13 SMART LOGIC
-            resp = generate_with_auto_pilot(strategy_name, parts)
-            
-            st.session_state.messages.append({"role":"assistant", "content":resp})
-            
-            changes = []
-            for f, c in re.findall(r"### FILE: (.+?)\n.*?```python(.*?)```", resp, re.DOTALL):
-                changes.append({"file": f.strip(), "code": c.strip()})
-            
-            if changes: st.session_state.pending_changes = changes
-            st.rerun()
-        except Exception as e:
-            st.error(f"Critical Error: {e}")
+    with st.sidebar:
+        st.header("Settings")
+        api_key = st.text_input("Gemini API Key", type="password")
+        if not api_key and "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+            st.success("Key loaded from secrets")
+        
+        # Επιλογή λειτουργίας
+        auto_apply = st.checkbox("Auto-Apply Changes", value=False, help="Ενεργοποιεί την αυτόματη εφαρμογή και το Self-Healing.")
+        
+        st.markdown("---")
+        st.caption("Active Rules:")
+        for rule in PROTECTED_FEATURES: st.caption(rule)
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    col1, col2 = st.columns([0.85, 0.15])
+    with col1: user_in = st.chat_input("Εντολή...")
+    with col2: 
+        st.write("🎙️")
+        audio = mic_recorder(start_prompt="Rec", stop_prompt="Stop", key='recorder')
+
+    final_input = user_in
+    is_audio = False
+    if audio: 
+        final_input = audio['bytes']
+        is_audio = True
+
+    if final_input and api_key:
+        if not is_audio:
+            st.session_state.messages.append({"role": "user", "content": final_input})
+            with st.chat_message("user"): st.markdown(final_input)
+        else:
+            with st.chat_message("user"): st.write("🎤 Audio sent...")
+
+        files = get_project_structure()
+        full_context = "PROJECT FILES:\n" + "\n".join([f"--- {k} ---\n{v[:3000]}..." for k, v in files.items()])
+        
+        prompt_text = f"""
+        ROLE: Senior Python Architect (Mastro Nek). LANG: GREEK.
+        MISSION: Maintain and upgrade the HVAC Streamlit App.
+        RULES: {PROTECTED_FEATURES}
+        
+        INSTRUCTIONS:
+        1. Analyze the request.
+        2. Provide FULL COMPLETE CODE for the files that need changing.
+        3. Use the format below EXACTLY.
+        
+        FORMAT FOR CHANGES:
+        ### FILE: path/to/filename.py
+        ```python
+        # Full content of the file
+        ```
+        
+        CONTEXT:
+        {full_context}
+        
+        REQUEST: {user_in if not is_audio else "Audio Command"}
+        """
+
+        parts = [prompt_text]
+        if is_audio: parts.append({"mime_type": "audio/wav", "data": final_input})
+
+        with st.chat_message("assistant"):
+            with st.spinner("O Αρχιτέκτονας ελέγχει τα σχέδια (Gemini 1.5 Flash)..."):
+                response_text = generate_with_auto_pilot("Auto", parts, api_key)
+                st.markdown(response_text)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                
+                # --- AUTO APPLY LOGIC (WITH SELF HEALING) ---
+                if auto_apply:
+                    with st.status("Έλεγχος & Εφαρμογή Αλλαγών...", expanded=True) as status:
+                        st.write("🔍 Έλεγχος Σύνταξης & Self-Healing...")
+                        # Περνάμε και το api_key για να μπορεί να κάνει healing
+                        result_log = apply_changes_from_response(response_text, api_key)
+                        
+                        st.code(result_log)
+                        
+                        if "UPDATED" in result_log:
+                            status.update(label="Επιτυχία! Ο κώδικας ενημερώθηκε.", state="complete", expanded=False)
+                            time.sleep(1)
+                            st.rerun()
+                        elif "DEAD CODE" in result_log:
+                            status.update(label="⛔ Αποτυχία: Το Self-Healing δεν μπόρεσε να φτιάξει το λάθος.", state="error", expanded=True)
+                        else:
+                            status.update(label="Δεν βρέθηκαν αλλαγές προς εφαρμογή.", state="complete")
 
 if __name__ == "__main__":
     main()
